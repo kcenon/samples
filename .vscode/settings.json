@@ -19,5 +19,11 @@
         "utility": "cpp",
         "variant": "cpp"
     },
-    "files.eol": "\n"
+    "files.eol": "\n",
+    "vcpkg.target.defaultTriplet": "-osx",
+    "vcpkg.target.hostTriplet": "-osx",
+    "vcpkg.target.useStaticLib": false,
+    "cmake.configureArgs": [
+        "-DVCPKG_TARGET_TRIPLET=-osx"
+    ]
 }

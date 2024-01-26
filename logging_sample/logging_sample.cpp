@@ -32,8 +32,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "logging.h"
 
-#include "converting.h"
 #include "argument_parser.h"
+#include "converting.h"
 
 #include "fmt/format.h"
 #include "fmt/xchar.h"
@@ -54,93 +54,89 @@ logging_level log_level = logging_level::information;
 logging_styles logging_style = logging_styles::file_only;
 #endif
 
-bool parse_arguments(argument_manager& arguments);
+bool parse_arguments(argument_manager &arguments);
 void display_help(void);
 
-int main(int argc, char* argv[])
-{
-	argument_manager arguments(argc, argv);
-	if (!parse_arguments(arguments))
-	{
-		return 0;
-	}
+int main(int argc, char *argv[]) {
+  argument_manager arguments(argc, argv);
+  if (!parse_arguments(arguments)) {
+    return 0;
+  }
 
-	logger::handle().set_write_console(logging_style);
-	logger::handle().set_target_level(log_level);
+  logger::handle().set_write_console(logging_style);
+  logger::handle().set_target_level(log_level);
 #ifdef _WIN32
-	logger::handle().start(PROGRAM_NAME, locale("ko_KR.UTF-8"));
+  logger::handle().start(PROGRAM_NAME, locale("ko_KR.UTF-8"));
 #else
-	logger::handle().start(PROGRAM_NAME);
+  logger::handle().start(PROGRAM_NAME);
 #endif
 
-	vector<thread> threads;
-	for (unsigned short thread_index = 0; thread_index < 10; ++thread_index)
-	{
-		threads.push_back(
-			thread([](const unsigned short& thread_index)
-				{
-					for (unsigned int log_index = 0; log_index < 1000; ++log_index)
-					{
-						logger::handle().write(logging_level::information, fmt::format(L"테스트_in_thread_{}: {}", thread_index, log_index));
-					}
-				}, thread_index)
-		);
-	}
+  vector<thread> threads;
+  for (unsigned short thread_index = 0; thread_index < 10; ++thread_index) {
+    threads.push_back(thread(
+        [](const unsigned short &thread_index) {
+          for (unsigned int log_index = 0; log_index < 1000; ++log_index) {
+            logger::handle().write(logging_level::information,
+                                   fmt::format(L"테스트_in_thread_{}: {}",
+                                               thread_index, log_index));
+          }
+        },
+        thread_index));
+  }
 
-	for (auto& thread : threads)
-	{
-		thread.join();
-	}
+  for (auto &thread : threads) {
+    thread.join();
+  }
 
-	logger::handle().stop();
+  logger::handle().stop();
 
-    return 0;
+  return 0;
 }
 
-bool parse_arguments(argument_manager& arguments)
-{
-	wstring temp;
+bool parse_arguments(argument_manager &arguments) {
+  wstring temp;
 
-	auto string_target = arguments.to_string(L"--help");
-	if (string_target != nullopt)
-	{
-		display_help();
+  auto string_target = arguments.to_string(L"--help");
+  if (string_target != nullopt) {
+    display_help();
 
-		return false;
-	}
+    return false;
+  }
 
-	auto int_target = arguments.to_int(L"--logging_level");
-	if (int_target != nullopt)
-	{
-		log_level = (logging_level)*int_target;
-	}
-	
-	auto bool_target = arguments.to_bool(L"--write_console_only");
-	if (bool_target != nullopt && *bool_target)
-	{
-		logging_style = logging_styles::console_only;
+  auto int_target = arguments.to_int(L"--logging_level");
+  if (int_target != nullopt) {
+    log_level = (logging_level)*int_target;
+  }
 
-		return true;
-	}
+  auto bool_target = arguments.to_bool(L"--write_console_only");
+  if (bool_target != nullopt && *bool_target) {
+    logging_style = logging_styles::console_only;
 
-	bool_target = arguments.to_bool(L"--write_console");
-	if (bool_target != nullopt && *bool_target)
-	{
-		logging_style = logging_styles::file_and_console;
+    return true;
+  }
 
-		return true;
-	}
+  bool_target = arguments.to_bool(L"--write_console");
+  if (bool_target != nullopt && *bool_target) {
+    logging_style = logging_styles::file_and_console;
 
-	logging_style = logging_styles::file_only;
+    return true;
+  }
 
-	return true;
+  logging_style = logging_styles::file_only;
+
+  return true;
 }
 
-void display_help(void)
-{
-	wcout << L"logging sample options:" << endl << endl;
-	wcout << L"--write_console [value] " << endl;
-	wcout << L"\tThe write_console_mode on/off. If you want to display log on console must be appended '--write_console true'.\n\tInitialize value is --write_console off." << endl << endl;
-	wcout << L"--logging_level [value]" << endl;
-	wcout << L"\tIf you want to change log level must be appended '--logging_level [level]'." << endl;
+void display_help(void) {
+  wcout << L"logging sample options:" << endl << endl;
+  wcout << L"--write_console [value] " << endl;
+  wcout << L"\tThe write_console_mode on/off. If you want to display log on "
+           L"console must be appended '--write_console true'.\n\tInitialize "
+           L"value is --write_console off."
+        << endl
+        << endl;
+  wcout << L"--logging_level [value]" << endl;
+  wcout << L"\tIf you want to change log level must be appended "
+           L"'--logging_level [level]'."
+        << endl;
 }

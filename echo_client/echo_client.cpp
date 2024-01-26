@@ -30,26 +30,26 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *****************************************************************************/
 
-#include <iostream>
-#include <string>
-#include <stdlib.h>
 #include <future>
+#include <iostream>
 #include <memory>
+#include <stdlib.h>
+#include <string>
 
-#include "job.h"
-#include "logging.h"
-#include "job_pool.h"
+#include "argument_parser.h"
 #include "converting.h"
 #include "file_handler.h"
-#include "argument_parser.h"
+#include "job.h"
+#include "job_pool.h"
+#include "logging.h"
 #include "messaging_client.h"
 
 #include "container.h"
-#include "values/string_value.h"
 #include "values/container_value.h"
+#include "values/string_value.h"
 
-#include "fmt/xchar.h"
 #include "fmt/format.h"
+#include "fmt/xchar.h"
 
 constexpr auto PROGRAM_NAME = L"echo_client";
 
@@ -82,330 +82,311 @@ unsigned short low_priority_count = 3;
 
 shared_ptr<thread_pool> _thread_pool = nullptr;
 
-map<wstring, function<void(const vector<uint8_t>&)>> _registered_messages;
+map<wstring, function<void(const vector<uint8_t> &)>> _registered_messages;
 
 optional<promise<bool>> _promise_status;
 future<bool> _future_status;
 shared_ptr<messaging_client> _client = nullptr;
 
-bool parse_arguments(argument_manager& arguments);
+bool parse_arguments(argument_manager &arguments);
 void display_help(void);
 
 void create_client(void);
 void create_thread_pool(void);
-void send_echo_test_message(const wstring& target_id, const wstring& target_sub_id);
-void connection(const wstring& target_id, const wstring& target_sub_id, const bool& condition);
+void send_echo_test_message(const wstring &target_id,
+                            const wstring &target_sub_id);
+void connection(const wstring &target_id, const wstring &target_sub_id,
+                const bool &condition);
 void received_message(shared_ptr<container::value_container> container);
-void received_binary_message(const wstring& source_id, const wstring& source_sub_id, 
-	const wstring& target_id, const wstring& target_sub_id, const vector<uint8_t>& data);
-void received_echo_test(const vector<uint8_t>& data);
+void received_binary_message(const wstring &source_id,
+                             const wstring &source_sub_id,
+                             const wstring &target_id,
+                             const wstring &target_sub_id,
+                             const vector<uint8_t> &data);
+void received_echo_test(const vector<uint8_t> &data);
 
-int main(int argc, char* argv[])
-{
-	argument_manager arguments(argc, argv);
-	if (!parse_arguments(arguments))
-	{
-		return 0;
-	}
+int main(int argc, char *argv[]) {
+  argument_manager arguments(argc, argv);
+  if (!parse_arguments(arguments)) {
+    return 0;
+  }
 
-	logger::handle().set_write_console(logging_style);
-	logger::handle().set_target_level(log_level);
+  logger::handle().set_write_console(logging_style);
+  logger::handle().set_target_level(log_level);
 #ifdef _WIN32
-	logger::handle().start(PROGRAM_NAME, locale("ko_KR.UTF-8"));
+  logger::handle().start(PROGRAM_NAME, locale("ko_KR.UTF-8"));
 #else
-	logger::handle().start(PROGRAM_NAME);
+  logger::handle().start(PROGRAM_NAME);
 #endif
 
-	_registered_messages.insert({ L"echo_test", received_echo_test });
+  _registered_messages.insert({L"echo_test", received_echo_test});
 
-	create_thread_pool();
+  create_thread_pool();
 
-	create_client();
+  create_client();
 
-	_promise_status = { promise<bool>() };
-	_future_status = _promise_status.value().get_future();
+  _promise_status = {promise<bool>()};
+  _future_status = _promise_status.value().get_future();
 
-	_future_status.wait();
-	_promise_status.reset();
+  _future_status.wait();
+  _promise_status.reset();
 
-	_thread_pool->stop();
-	_thread_pool.reset();
+  _thread_pool->stop();
+  _thread_pool.reset();
 
-	_client->stop();
-	_client.reset();
+  _client->stop();
+  _client.reset();
 
-	logger::handle().stop();
+  logger::handle().stop();
 
-	return 0;
+  return 0;
 }
 
-bool parse_arguments(argument_manager& arguments)
-{
-	wstring temp;
+bool parse_arguments(argument_manager &arguments) {
+  wstring temp;
 
-	auto string_target = arguments.to_string(L"--help");
-	if (string_target != nullopt)
-	{
-		display_help();
+  auto string_target = arguments.to_string(L"--help");
+  if (string_target != nullopt) {
+    display_help();
 
-		return false;
-	}
+    return false;
+  }
 
-	auto bool_target = arguments.to_bool(L"--encrypt_mode");
-	if (bool_target != nullopt)
-	{
-		encrypt_mode = *bool_target;
-	}
+  auto bool_target = arguments.to_bool(L"--encrypt_mode");
+  if (bool_target != nullopt) {
+    encrypt_mode = *bool_target;
+  }
 
-	bool_target = arguments.to_bool(L"--compress_mode");
-	if (bool_target != nullopt)
-	{
-		compress_mode = *bool_target;
-	}
+  bool_target = arguments.to_bool(L"--compress_mode");
+  if (bool_target != nullopt) {
+    compress_mode = *bool_target;
+  }
 
-	bool_target = arguments.to_bool(L"--binary_mode");
-	if (bool_target != nullopt)
-	{
-		binary_mode = *bool_target;
-	}
+  bool_target = arguments.to_bool(L"--binary_mode");
+  if (bool_target != nullopt) {
+    binary_mode = *bool_target;
+  }
 
-	auto ushort_target = arguments.to_ushort(L"--compress_block_size");
-	if (ushort_target != nullopt)
-	{
-		compress_block_size = *ushort_target;
-	}
+  auto ushort_target = arguments.to_ushort(L"--compress_block_size");
+  if (ushort_target != nullopt) {
+    compress_block_size = *ushort_target;
+  }
 
-	string_target = arguments.to_string(L"--connection_key");
-	if (string_target != nullopt)
-	{
-		temp = converter::to_wstring(file::load(*string_target));
-		if (!temp.empty())
-		{
-			connection_key = temp;
-		}
-	}
+  string_target = arguments.to_string(L"--connection_key");
+  if (string_target != nullopt) {
+    temp = converter::to_wstring(file::load(*string_target));
+    if (!temp.empty()) {
+      connection_key = temp;
+    }
+  }
 
-	ushort_target = arguments.to_ushort(L"--server_port");
-	if (ushort_target != nullopt)
-	{
-		server_port = *ushort_target;
-	}
+  ushort_target = arguments.to_ushort(L"--server_port");
+  if (ushort_target != nullopt) {
+    server_port = *ushort_target;
+  }
 
-	ushort_target = arguments.to_ushort(L"--high_priority_count");
-	if (ushort_target != nullopt)
-	{
-		high_priority_count = *ushort_target;
-	}
+  ushort_target = arguments.to_ushort(L"--high_priority_count");
+  if (ushort_target != nullopt) {
+    high_priority_count = *ushort_target;
+  }
 
-	ushort_target = arguments.to_ushort(L"--normal_priority_count");
-	if (ushort_target != nullopt)
-	{
-		normal_priority_count = *ushort_target;
-	}
+  ushort_target = arguments.to_ushort(L"--normal_priority_count");
+  if (ushort_target != nullopt) {
+    normal_priority_count = *ushort_target;
+  }
 
-	ushort_target = arguments.to_ushort(L"--low_priority_count");
-	if (ushort_target != nullopt)
-	{
-		low_priority_count = *ushort_target;
-	}
-	
-	auto int_target = arguments.to_int(L"--logging_level");
-	if (int_target != nullopt)
-	{
-		log_level = (logging_level)*int_target;
-	}
-	
-	bool_target = arguments.to_bool(L"--write_console_only");
-	if (bool_target != nullopt && *bool_target)
-	{
-		logging_style = logging_styles::console_only;
+  ushort_target = arguments.to_ushort(L"--low_priority_count");
+  if (ushort_target != nullopt) {
+    low_priority_count = *ushort_target;
+  }
 
-		return true;
-	}
+  auto int_target = arguments.to_int(L"--logging_level");
+  if (int_target != nullopt) {
+    log_level = (logging_level)*int_target;
+  }
 
-	bool_target = arguments.to_bool(L"--write_console");
-	if (bool_target != nullopt && *bool_target)
-	{
-		logging_style = logging_styles::file_and_console;
+  bool_target = arguments.to_bool(L"--write_console_only");
+  if (bool_target != nullopt && *bool_target) {
+    logging_style = logging_styles::console_only;
 
-		return true;
-	}
+    return true;
+  }
 
-	logging_style = logging_styles::file_only;
+  bool_target = arguments.to_bool(L"--write_console");
+  if (bool_target != nullopt && *bool_target) {
+    logging_style = logging_styles::file_and_console;
 
-	return true;
+    return true;
+  }
+
+  logging_style = logging_styles::file_only;
+
+  return true;
 }
 
-void display_help(void)
-{
-	wcout << L"pathfinder connector options:" << endl << endl;
-	wcout << L"--write_console [value] " << endl;
-	wcout << L"\tThe write_console_mode on/off. If you want to display log on console must be appended '--write_console true'.\n\tInitialize value is --write_console off." << endl << endl;
-	wcout << L"--logging_level [value]" << endl;
-	wcout << L"\tIf you want to change log level must be appended '--logging_level [level]'." << endl;
+void display_help(void) {
+  wcout << L"pathfinder connector options:" << endl << endl;
+  wcout << L"--write_console [value] " << endl;
+  wcout << L"\tThe write_console_mode on/off. If you want to display log on "
+           L"console must be appended '--write_console true'.\n\tInitialize "
+           L"value is --write_console off."
+        << endl
+        << endl;
+  wcout << L"--logging_level [value]" << endl;
+  wcout << L"\tIf you want to change log level must be appended "
+           L"'--logging_level [level]'."
+        << endl;
 }
 
-void create_client(void)
-{
-	if (_client != nullptr)
-	{
-		_client.reset();
-	}
+void create_client(void) {
+  if (_client != nullptr) {
+    _client.reset();
+  }
 
-	_client = make_shared<messaging_client>(PROGRAM_NAME);
-	_client->set_encrypt_mode(encrypt_mode);
-	_client->set_compress_mode(compress_mode);
-	_client->set_compress_block_size(compress_block_size);
-	_client->set_connection_key(connection_key);
-	_client->set_connection_notification(&connection);
-	if (binary_mode)
-	{
-		_client->set_binary_notification(&received_binary_message);
-		_client->set_session_types({ session_types::binary_line });
-	}
-	else
-	{
-		_client->set_message_notification(&received_message);
-		_client->set_session_types({ session_types::message_line });
-	}
-	_client->start(server_ip, server_port, high_priority_count, normal_priority_count, low_priority_count);
+  _client = make_shared<messaging_client>(PROGRAM_NAME);
+  _client->set_encrypt_mode(encrypt_mode);
+  _client->set_compress_mode(compress_mode);
+  _client->set_compress_block_size(compress_block_size);
+  _client->set_connection_key(connection_key);
+  _client->set_connection_notification(&connection);
+  if (binary_mode) {
+    _client->set_binary_notification(&received_binary_message);
+    _client->set_session_types({session_types::binary_line});
+  } else {
+    _client->set_message_notification(&received_message);
+    _client->set_session_types({session_types::message_line});
+  }
+  _client->start(server_ip, server_port, high_priority_count,
+                 normal_priority_count, low_priority_count);
 }
 
-void create_thread_pool(void)
-{
-	if (_thread_pool != nullptr)
-	{
-		_thread_pool.reset();
-	}
+void create_thread_pool(void) {
+  if (_thread_pool != nullptr) {
+    _thread_pool.reset();
+  }
 
-	_thread_pool = make_shared<thread_pool>();
-	for (unsigned short high = 0; high < high_priority_count; ++high)
-	{
-		_thread_pool->append(make_shared<thread_worker>(priorities::high));
-	}
-	for (unsigned short normal = 0; normal < normal_priority_count; ++normal)
-	{
-		_thread_pool->append(make_shared<thread_worker>(priorities::normal, vector<priorities> { priorities::high }));
-	}
-	for (unsigned short low = 0; low < low_priority_count; ++low)
-	{
-		_thread_pool->append(make_shared<thread_worker>(priorities::low, vector<priorities> { priorities::high, priorities::normal }));
-	}
-	_thread_pool->start();
+  _thread_pool = make_shared<thread_pool>();
+  for (unsigned short high = 0; high < high_priority_count; ++high) {
+    _thread_pool->append(make_shared<thread_worker>(priorities::high));
+  }
+  for (unsigned short normal = 0; normal < normal_priority_count; ++normal) {
+    _thread_pool->append(make_shared<thread_worker>(
+        priorities::normal, vector<priorities>{priorities::high}));
+  }
+  for (unsigned short low = 0; low < low_priority_count; ++low) {
+    _thread_pool->append(make_shared<thread_worker>(
+        priorities::low,
+        vector<priorities>{priorities::high, priorities::normal}));
+  }
+  _thread_pool->start();
 }
 
-void send_echo_test_message(const wstring& target_id, const wstring& target_sub_id)
-{
-	if (binary_mode)
-	{
-		_client->send_binary(target_id, target_sub_id, converter::to_array(L"echo_test"));
+void send_echo_test_message(const wstring &target_id,
+                            const wstring &target_sub_id) {
+  if (binary_mode) {
+    _client->send_binary(target_id, target_sub_id,
+                         converter::to_array(L"echo_test"));
 
-		return;
-	}
+    return;
+  }
 
-	shared_ptr<container::value_container> container =
-		make_shared<container::value_container>(target_id, target_sub_id, L"echo_test", vector<shared_ptr<value>>{});
+  shared_ptr<container::value_container> container =
+      make_shared<container::value_container>(
+          target_id, target_sub_id, L"echo_test", vector<shared_ptr<value>>{});
 
-	_client->send(container);
+  _client->send(container);
 }
 
-void connection(const wstring& target_id, const wstring& target_sub_id, const bool& condition)
-{
-	logger::handle().write(logging_level::information,
-		fmt::format(L"an echo_client({}[{}]) is {} an echo_server", target_id, target_sub_id,
-			condition ? L"connected to" : L"disconnected from"));
+void connection(const wstring &target_id, const wstring &target_sub_id,
+                const bool &condition) {
+  logger::handle().write(
+      logging_level::information,
+      fmt::format(L"an echo_client({}[{}]) is {} an echo_server", target_id,
+                  target_sub_id,
+                  condition ? L"connected to" : L"disconnected from"));
 
-	if (condition)
-	{
-		send_echo_test_message(target_id, target_sub_id);
+  if (condition) {
+    send_echo_test_message(target_id, target_sub_id);
 
-		return;
-	}
+    return;
+  }
 
-	if (_promise_status.has_value())
-	{
-		_promise_status.value().set_value(false);
-	}
+  if (_promise_status.has_value()) {
+    _promise_status.value().set_value(false);
+  }
 }
 
-void received_message(shared_ptr<container::value_container> container)
-{
-	if (container == nullptr)
-	{
-		return;
-	}
+void received_message(shared_ptr<container::value_container> container) {
+  if (container == nullptr) {
+    return;
+  }
 
-	auto message_type = _registered_messages.find(container->message_type());
-	if (message_type != _registered_messages.end())
-	{
-		if (_thread_pool)
-		{
-			_thread_pool->push(make_shared<job>(priorities::high, 
-				converter::to_array(container->serialize()), message_type->second));
-		}
+  auto message_type = _registered_messages.find(container->message_type());
+  if (message_type != _registered_messages.end()) {
+    if (_thread_pool) {
+      _thread_pool->push(make_shared<job>(
+          priorities::high, converter::to_array(container->serialize()),
+          message_type->second));
+    }
 
-		return;
-	}
+    return;
+  }
 
-	logger::handle().write(logging_level::sequence,
-		fmt::format(L"unknown message: {}", container->serialize()));
+  logger::handle().write(
+      logging_level::sequence,
+      fmt::format(L"unknown message: {}", container->serialize()));
 
-	if (_promise_status.has_value())
-	{
-		_promise_status.value().set_value(false);
-	}
+  if (_promise_status.has_value()) {
+    _promise_status.value().set_value(false);
+  }
 }
 
-void received_binary_message(const wstring& source_id, const wstring& source_sub_id, 
-	const wstring& target_id, const wstring& target_sub_id, const vector<uint8_t>& data)
-{
-	if (data.empty())
-	{
-		if (_promise_status.has_value())
-		{
-			_promise_status.value().set_value(false);
-		}
+void received_binary_message(const wstring &source_id,
+                             const wstring &source_sub_id,
+                             const wstring &target_id,
+                             const wstring &target_sub_id,
+                             const vector<uint8_t> &data) {
+  if (data.empty()) {
+    if (_promise_status.has_value()) {
+      _promise_status.value().set_value(false);
+    }
 
-		return;
-	}
+    return;
+  }
 
-	logger::handle().write(logging_level::sequence,
-		fmt::format(L"received message: {}", converter::to_wstring(data)));
+  logger::handle().write(
+      logging_level::sequence,
+      fmt::format(L"received message: {}", converter::to_wstring(data)));
 
-	if (_promise_status.has_value())
-	{
-		_promise_status.value().set_value(true);
-	}
+  if (_promise_status.has_value()) {
+    _promise_status.value().set_value(true);
+  }
 }
 
-void received_echo_test(const vector<uint8_t>& data)
-{
-	if (data.empty())
-	{
-		if (_promise_status.has_value())
-		{
-			_promise_status.value().set_value(false);
-		}
+void received_echo_test(const vector<uint8_t> &data) {
+  if (data.empty()) {
+    if (_promise_status.has_value()) {
+      _promise_status.value().set_value(false);
+    }
 
-		return;
-	}
+    return;
+  }
 
-	shared_ptr<container::value_container> container = make_shared<container::value_container>(data, false);
-	if (container == nullptr)
-	{
-		if (_promise_status.has_value())
-		{
-			_promise_status.value().set_value(false);
-		}
+  shared_ptr<container::value_container> container =
+      make_shared<container::value_container>(data, false);
+  if (container == nullptr) {
+    if (_promise_status.has_value()) {
+      _promise_status.value().set_value(false);
+    }
 
-		return;
-	}
+    return;
+  }
 
-	logger::handle().write(logging_level::sequence,
-		fmt::format(L"received message: {}", container->message_type()));
+  logger::handle().write(
+      logging_level::sequence,
+      fmt::format(L"received message: {}", container->message_type()));
 
-	if (_promise_status.has_value())
-	{
-		_promise_status.value().set_value(true);
-	}
+  if (_promise_status.has_value()) {
+    _promise_status.value().set_value(true);
+  }
 }
