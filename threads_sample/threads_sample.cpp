@@ -59,186 +59,212 @@ logging_level log_level = logging_level::information;
 logging_styles logging_style = logging_styles::file_only;
 #endif
 
-bool parse_arguments(argument_manager &arguments);
+bool parse_arguments(argument_manager& arguments);
 void display_help(void);
 
-void write_data(const vector<unsigned char> &data) {
-  logger::handle().write(logging_level::information,
-                         converter::to_wstring(data));
+void write_data(const vector<unsigned char>& data)
+{
+	logger::handle().write(logging_level::information,
+						   converter::to_wstring(data));
 }
 
-void write_high(void) {
-  write_data(converter::to_array(L"테스트2_high_in_thread"));
+void write_high(void)
+{
+	write_data(converter::to_array(L"테스트2_high_in_thread"));
 }
 
-void write_normal(void) {
-  write_data(converter::to_array(L"테스트2_normal_in_thread"));
+void write_normal(void)
+{
+	write_data(converter::to_array(L"테스트2_normal_in_thread"));
 }
 
-void write_low(void) {
-  write_data(converter::to_array(L"테스트2_low_in_thread"));
+void write_low(void)
+{
+	write_data(converter::to_array(L"테스트2_low_in_thread"));
 }
 
-class saving_test_job : public job {
+class saving_test_job : public job
+{
 public:
-  saving_test_job(const priorities &priority, const vector<unsigned char> &data)
-      : job(priority, data) {
-    save(L"thread_sample");
-  }
+	saving_test_job(const priorities& priority,
+					const vector<unsigned char>& data)
+		: job(priority, data)
+	{
+		save(L"thread_sample");
+	}
 
 protected:
-  void working(const priorities &worker_priority) override {
-    logger::handle().write(logging_level::information,
-                           converter::to_wstring(_data));
-  }
+	void working(const priorities& worker_priority) override
+	{
+		logger::handle().write(logging_level::information,
+							   converter::to_wstring(_data));
+	}
 };
 
-class test_job_without_data : public job {
+class test_job_without_data : public job
+{
 public:
-  test_job_without_data(const priorities &priority) : job(priority) {}
+	test_job_without_data(const priorities& priority) : job(priority) {}
 
 protected:
-  void working(const priorities &worker_priority) override {
-    auto pool = _job_pool.lock();
-    if (pool != nullptr) {
-      pool->push(make_shared<job>(
-          priority(), converter::to_array(L"테스트5_in_thread"), &write_data));
-    }
+	void working(const priorities& worker_priority) override
+	{
+		auto pool = _job_pool.lock();
+		if (pool != nullptr)
+		{
+			pool->push(make_shared<job>(
+				priority(), converter::to_array(L"테스트5_in_thread"),
+				&write_data));
+		}
 
-    switch (priority()) {
-    case priorities::high:
-      logger::handle().write(logging_level::information,
-                             L"테스트4_high_in_thread");
-      break;
-    case priorities::normal:
-      logger::handle().write(logging_level::information,
-                             L"테스트4_normal_in_thread");
-      break;
-    case priorities::low:
-      logger::handle().write(logging_level::information,
-                             L"테스트4_low_in_thread");
-      break;
-    default:
-      break;
-    }
-  }
+		switch (priority())
+		{
+		case priorities::high:
+			logger::handle().write(logging_level::information,
+								   L"테스트4_high_in_thread");
+			break;
+		case priorities::normal:
+			logger::handle().write(logging_level::information,
+								   L"테스트4_normal_in_thread");
+			break;
+		case priorities::low:
+			logger::handle().write(logging_level::information,
+								   L"테스트4_low_in_thread");
+			break;
+		default:
+			break;
+		}
+	}
 };
 
-int main(int argc, char *argv[]) {
-  argument_manager arguments(argc, argv);
-  if (!parse_arguments(arguments)) {
-    return 0;
-  }
+int main(int argc, char* argv[])
+{
+	argument_manager arguments(argc, argv);
+	if (!parse_arguments(arguments))
+	{
+		return 0;
+	}
 
-  logger::handle().set_write_console(logging_style);
-  logger::handle().set_target_level(log_level);
+	logger::handle().set_write_console(logging_style);
+	logger::handle().set_target_level(log_level);
 #ifdef _WIN32
-  logger::handle().start(PROGRAM_NAME, locale("ko_KR.UTF-8"));
+	logger::handle().start(PROGRAM_NAME, locale("ko_KR.UTF-8"));
 #else
-  logger::handle().start(PROGRAM_NAME);
+	logger::handle().start(PROGRAM_NAME);
 #endif
 
-  thread_pool manager;
-  manager.append(make_shared<thread_worker>(priorities::high));
-  manager.append(make_shared<thread_worker>(priorities::high));
-  manager.append(make_shared<thread_worker>(priorities::high));
-  manager.append(make_shared<thread_worker>(
-      priorities::normal, vector<priorities>{priorities::high}));
-  manager.append(make_shared<thread_worker>(
-      priorities::normal, vector<priorities>{priorities::high}));
-  manager.append(make_shared<thread_worker>(
-      priorities::low,
-      vector<priorities>{priorities::high, priorities::normal}));
+	thread_pool manager;
+	manager.append(make_shared<thread_worker>(priorities::high));
+	manager.append(make_shared<thread_worker>(priorities::high));
+	manager.append(make_shared<thread_worker>(priorities::high));
+	manager.append(make_shared<thread_worker>(
+		priorities::normal, vector<priorities>{ priorities::high }));
+	manager.append(make_shared<thread_worker>(
+		priorities::normal, vector<priorities>{ priorities::high }));
+	manager.append(make_shared<thread_worker>(
+		priorities::low,
+		vector<priorities>{ priorities::high, priorities::normal }));
 
-  // unit job with callback and data
-  for (unsigned int log_index = 0; log_index < 1000; ++log_index) {
-    manager.push(make_shared<job>(priorities::high,
-                                  converter::to_array(L"테스트_high_in_thread"),
-                                  &write_data));
-    manager.push(make_shared<job>(
-        priorities::normal, converter::to_array(L"테스트_normal_in_thread"),
-        &write_data));
-    manager.push(make_shared<job>(priorities::low,
-                                  converter::to_array(L"테스트_low_in_thread"),
-                                  &write_data));
-  }
+	// unit job with callback and data
+	for (unsigned int log_index = 0; log_index < 1000; ++log_index)
+	{
+		manager.push(make_shared<job>(
+			priorities::high, converter::to_array(L"테스트_high_in_thread"),
+			&write_data));
+		manager.push(make_shared<job>(
+			priorities::normal, converter::to_array(L"테스트_normal_in_thread"),
+			&write_data));
+		manager.push(make_shared<job>(
+			priorities::low, converter::to_array(L"테스트_low_in_thread"),
+			&write_data));
+	}
 
-  // unit job with callback
-  for (unsigned int log_index = 0; log_index < 1000; ++log_index) {
-    manager.push(make_shared<job>(priorities::high, &write_high));
-    manager.push(make_shared<job>(priorities::normal, &write_normal));
-    manager.push(make_shared<job>(priorities::low, &write_low));
-  }
+	// unit job with callback
+	for (unsigned int log_index = 0; log_index < 1000; ++log_index)
+	{
+		manager.push(make_shared<job>(priorities::high, &write_high));
+		manager.push(make_shared<job>(priorities::normal, &write_normal));
+		manager.push(make_shared<job>(priorities::low, &write_low));
+	}
 
-  // derived job with data
-  for (unsigned int log_index = 0; log_index < 1000; ++log_index) {
-    manager.push(make_shared<saving_test_job>(
-        priorities::high, converter::to_array(L"테스트3_high_in_thread")));
-    manager.push(make_shared<saving_test_job>(
-        priorities::normal, converter::to_array(L"테스트3_normal_in_thread")));
-    manager.push(make_shared<saving_test_job>(
-        priorities::low, converter::to_array(L"테스트3_low_in_thread")));
-  }
+	// derived job with data
+	for (unsigned int log_index = 0; log_index < 1000; ++log_index)
+	{
+		manager.push(make_shared<saving_test_job>(
+			priorities::high, converter::to_array(L"테스트3_high_in_thread")));
+		manager.push(make_shared<saving_test_job>(
+			priorities::normal,
+			converter::to_array(L"테스트3_normal_in_thread")));
+		manager.push(make_shared<saving_test_job>(
+			priorities::low, converter::to_array(L"테스트3_low_in_thread")));
+	}
 
-  // derived job without data
-  for (unsigned int log_index = 0; log_index < 1000; ++log_index) {
-    manager.push(make_shared<test_job_without_data>(priorities::high));
-    manager.push(make_shared<test_job_without_data>(priorities::normal));
-    manager.push(make_shared<test_job_without_data>(priorities::low));
-  }
+	// derived job without data
+	for (unsigned int log_index = 0; log_index < 1000; ++log_index)
+	{
+		manager.push(make_shared<test_job_without_data>(priorities::high));
+		manager.push(make_shared<test_job_without_data>(priorities::normal));
+		manager.push(make_shared<test_job_without_data>(priorities::low));
+	}
 
-  manager.start();
-  manager.stop(false);
+	manager.start();
+	manager.stop(false);
 
-  logger::handle().stop();
+	logger::handle().stop();
 
-  return 0;
+	return 0;
 }
 
-bool parse_arguments(argument_manager &arguments) {
-  wstring temp;
+bool parse_arguments(argument_manager& arguments)
+{
+	wstring temp;
 
-  auto string_target = arguments.to_string(L"--help");
-  if (string_target != nullopt) {
-    display_help();
+	auto string_target = arguments.to_string(L"--help");
+	if (string_target != nullopt)
+	{
+		display_help();
 
-    return false;
-  }
+		return false;
+	}
 
-  auto int_target = arguments.to_int(L"--logging_level");
-  if (int_target != nullopt) {
-    log_level = (logging_level)*int_target;
-  }
+	auto int_target = arguments.to_int(L"--logging_level");
+	if (int_target != nullopt)
+	{
+		log_level = (logging_level)*int_target;
+	}
 
-  auto bool_target = arguments.to_bool(L"--write_console_only");
-  if (bool_target != nullopt && *bool_target) {
-    logging_style = logging_styles::console_only;
+	auto bool_target = arguments.to_bool(L"--write_console_only");
+	if (bool_target != nullopt && *bool_target)
+	{
+		logging_style = logging_styles::console_only;
 
-    return true;
-  }
+		return true;
+	}
 
-  bool_target = arguments.to_bool(L"--write_console");
-  if (bool_target != nullopt && *bool_target) {
-    logging_style = logging_styles::file_and_console;
+	bool_target = arguments.to_bool(L"--write_console");
+	if (bool_target != nullopt && *bool_target)
+	{
+		logging_style = logging_styles::file_and_console;
 
-    return true;
-  }
+		return true;
+	}
 
-  logging_style = logging_styles::file_only;
+	logging_style = logging_styles::file_only;
 
-  return true;
+	return true;
 }
 
-void display_help(void) {
-  wcout << L"download sample options:" << endl << endl;
-  wcout << L"--write_console [value] " << endl;
-  wcout << L"\tThe write_console_mode on/off. If you want to display log on "
-           L"console must be appended '--write_console true'.\n\tInitialize "
-           L"value is --write_console off."
-        << endl
-        << endl;
-  wcout << L"--logging_level [value]" << endl;
-  wcout << L"\tIf you want to change log level must be appended "
-           L"'--logging_level [level]'."
-        << endl;
+void display_help(void)
+{
+	wcout << L"download sample options:" << endl << endl;
+	wcout << L"--write_console [value] " << endl;
+	wcout << L"\tThe write_console_mode on/off. If you want to display log on "
+			 L"console must be appended '--write_console true'.\n\tInitialize "
+			 L"value is --write_console off."
+		  << endl
+		  << endl;
+	wcout << L"--logging_level [value]" << endl;
+	wcout << L"\tIf you want to change log level must be appended "
+			 L"'--logging_level [level]'."
+		  << endl;
 }
