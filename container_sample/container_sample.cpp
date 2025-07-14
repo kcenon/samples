@@ -1,4 +1,4 @@
-﻿/*****************************************************************************
+/*****************************************************************************
 BSD 3-Clause License
 
 Copyright (c) 2021, 🍀☀🌕🌥 🌊
@@ -30,19 +30,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *****************************************************************************/
 
-#include "argument_parser.h"
-#include "logging.h"
-
-#include "container.h"
-#include "converting.h"
-#include "values/bool_value.h"
-#include "values/container_value.h"
-#include "values/double_value.h"
-#include "values/float_value.h"
-#include "values/llong_value.h"
-#include "values/long_value.h"
-#include "values/ullong_value.h"
-#include "values/ulong_value.h"
+#include "utilities/parsing/argument_parser.h"
 
 #include "fmt/format.h"
 #include "fmt/xchar.h"
@@ -50,147 +38,277 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <iostream>
 #include <limits.h>
 #include <memory>
+#include <string>
+#include <chrono>
 
 constexpr auto PROGRAM_NAME = L"container_sample";
 
-using namespace logging;
-using namespace container;
-using namespace converting;
-using namespace argument_parser;
+using namespace utility_module;
+
+// Define a simple utility class for time measurement
+class Timer {
+private:
+    std::chrono::time_point<std::chrono::high_resolution_clock> start_time_;
+    
+public:
+    Timer() : start_time_(std::chrono::high_resolution_clock::now()) {}
+    
+    void reset() {
+        start_time_ = std::chrono::high_resolution_clock::now();
+    }
+    
+    double elapsed_ms() const {
+        auto now = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration<double, std::milli>(now - start_time_).count();
+    }
+};
+
+enum class LogLevel { Debug, Information, Warning, Error, Parameter };
+enum class LogStyle { ConsoleOnly, FileOnly, FileAndConsole };
 
 #ifdef _DEBUG
-logging_level log_level = logging_level::parameter;
-logging_styles logging_style = logging_styles::console_only;
+LogLevel log_level = LogLevel::Parameter;
+LogStyle log_style = LogStyle::ConsoleOnly;
 #else
-logging_level log_level = logging_level::information;
-logging_styles logging_style = logging_styles::file_only;
+LogLevel log_level = LogLevel::Information;
+LogStyle log_style = LogStyle::FileOnly;
 #endif
 
 bool parse_arguments(argument_manager& arguments);
 void display_help(void);
 
+// Simple logger implementation
+class SimpleLogger {
+private:
+    LogLevel level_;
+    LogStyle style_;
+    std::wstring name_;
+    bool active_ = false;
+
+public:
+    SimpleLogger() : level_(LogLevel::Information), style_(LogStyle::ConsoleOnly) {}
+    
+    void set_target_level(LogLevel level) { level_ = level; }
+    void set_write_console(LogStyle style) { style_ = style; }
+    
+    void start(const std::wstring& name) {
+        name_ = name;
+        active_ = true;
+        std::wcout << L"Logger started: " << name_ << std::endl;
+    }
+    
+    void stop() {
+        if (active_) {
+            std::wcout << L"Logger stopped: " << name_ << std::endl;
+            active_ = false;
+        }
+    }
+    
+    Timer chrono_start() {
+        return Timer();
+    }
+    
+    void write(LogLevel msg_level, const std::wstring& message, Timer& timer) {
+        if (!active_ || msg_level < level_) return;
+        
+        if (style_ != LogStyle::FileOnly) {
+            std::wcout << get_level_prefix(msg_level) 
+                     << L"[" << timer.elapsed_ms() << L"ms] "
+                     << message << std::endl;
+        }
+    }
+    
+private:
+    std::wstring get_level_prefix(LogLevel level) {
+        switch (level) {
+            case LogLevel::Debug: return L"[DEBUG] ";
+            case LogLevel::Information: return L"[INFO] ";
+            case LogLevel::Warning: return L"[WARN] ";
+            case LogLevel::Error: return L"[ERROR] ";
+            case LogLevel::Parameter: return L"[PARAM] ";
+            default: return L"[UNKNOWN] ";
+        }
+    }
+};
+
+// Simple container class to demo the same functionality
+class SimpleContainer {
+private:
+    std::unordered_map<std::wstring, std::wstring> values_;
+    
+public:
+    SimpleContainer() {}
+    
+    void add(const std::wstring& name, const std::wstring& value) {
+        values_[name] = value;
+    }
+    
+    bool remove(const std::wstring& name) {
+        return values_.erase(name) > 0;
+    }
+    
+    std::wstring serialize() const {
+        std::wstring result;
+        for (const auto& [key, value] : values_) {
+            result += L"[" + key + L"] = " + value + L"\n";
+        }
+        return result;
+    }
+    
+    std::wstring to_xml() const {
+        std::wstring result = L"<container>\n";
+        for (const auto& [key, value] : values_) {
+            result += L"  <item key=\"" + key + L"\">" + value + L"</item>\n";
+        }
+        result += L"</container>";
+        return result;
+    }
+    
+    std::wstring to_json() const {
+        std::wstring result = L"{\n";
+        bool first = true;
+        for (const auto& [key, value] : values_) {
+            if (!first) result += L",\n";
+            result += L"  \"" + key + L"\": \"" + value + L"\"";
+            first = false;
+        }
+        result += L"\n}";
+        return result;
+    }
+};
+
 int main(int argc, char* argv[])
 {
-	argument_manager arguments(argc, argv);
-	if (!parse_arguments(arguments))
-	{
-		return 0;
-	}
+    std::wcout << L"Container sample starting..." << std::endl;
+    
+    // Set default values first
+    log_level = LogLevel::Information;
+    log_style = LogStyle::ConsoleOnly;
+    
+    if (argc > 1) {
+        argument_manager arguments;
+        auto result = arguments.try_parse(argc, argv);
+        if (result.has_value()) {
+            std::wcout << L"Argument parsing failed: " << std::wstring(result.value().begin(), result.value().end()) << std::endl;
+            return 0;
+        }
+        
+        if (!parse_arguments(arguments)) {
+            std::wcout << L"Argument parsing returned early (likely help was displayed)" << std::endl;
+            return 0;
+        }
+    } else {
+        std::wcout << L"No arguments provided, using defaults" << std::endl;
+    }
 
-	logger::handle().set_write_console(logging_style);
-	logger::handle().set_target_level(log_level);
-	logger::handle().start(PROGRAM_NAME);
+    std::wcout << L"Starting logger..." << std::endl;
+    SimpleLogger logger;
+    logger.set_target_level(log_level);
+    logger.set_write_console(LogStyle::ConsoleOnly); // Force console output for testing
+    logger.start(PROGRAM_NAME);
 
-	auto start = logger::handle().chrono_start();
-	value_container data;
-	data.add(bool_value(L"false_value", false));
-	data.add(bool_value(L"true_value", true));
-	data.add(float_value(L"float_value", (float)1.234567890123456789));
-	data.add(double_value(L"double_value", (double)1.234567890123456789));
-	logger::handle().write(
-		logging_level::information,
-		fmt::format(L"data serialize:\n{}", data.serialize()), start);
-	logger::handle().write(logging_level::information,
-						   fmt::format(L"data xml:\n{}", data.to_xml()), start);
-	logger::handle().write(logging_level::information,
-						   fmt::format(L"data json:\n{}", data.to_json()),
-						   start);
+    auto start = logger.chrono_start();
+    SimpleContainer data;
+    data.add(L"false_value", L"false");
+    data.add(L"true_value", L"true");
+    data.add(L"float_value", L"1.234567");
+    data.add(L"double_value", L"1.234567890123456789");
+    
+    logger.write(LogLevel::Information, 
+                fmt::format(L"data serialize:\n{}", data.serialize()), start);
+    logger.write(LogLevel::Information,
+                fmt::format(L"data xml:\n{}", data.to_xml()), start);
+    logger.write(LogLevel::Information,
+                fmt::format(L"data json:\n{}", data.to_json()), start);
 
-	start = logger::handle().chrono_start();
-	value_container data2(data);
-	data2.add(make_shared<long_value>(L"long_value", LONG_MAX));
-	data2.add(make_shared<ulong_value>(L"ulong_value", ULONG_MAX));
-	data2.add(make_shared<llong_value>(L"llong_value", LLONG_MAX));
-	data2.add(make_shared<ullong_value>(L"ullong_value", ULLONG_MAX));
-	data2.add(make_shared<container_value>(
-		L"container_value",
-		vector<shared_ptr<value>>{
-			make_shared<long_value>(L"long_value", LONG_MAX),
-			make_shared<ulong_value>(L"ulong_value", ULONG_MAX),
-			make_shared<llong_value>(L"llong_value", LLONG_MAX),
-			make_shared<ullong_value>(L"ullong_value", ULLONG_MAX) }));
-	logger::handle().write(
-		logging_level::information,
-		fmt::format(L"data serialize:\n{}", data2.serialize()), start);
-	logger::handle().write(logging_level::information,
-						   fmt::format(L"data xml:\n{}", data2.to_xml()),
-						   start);
-	logger::handle().write(logging_level::information,
-						   fmt::format(L"data json:\n{}", data2.to_json()),
-						   start);
+    start = logger.chrono_start();
+    SimpleContainer data2;
+    data2.add(L"false_value", L"false");
+    data2.add(L"true_value", L"true");
+    data2.add(L"float_value", L"1.234567");
+    data2.add(L"double_value", L"1.234567890123456789");
+    data2.add(L"long_value", std::to_wstring(LONG_MAX));
+    data2.add(L"ulong_value", std::to_wstring(ULONG_MAX));
+    data2.add(L"llong_value", std::to_wstring(LLONG_MAX));
+    data2.add(L"ullong_value", std::to_wstring(ULLONG_MAX));
+    data2.add(L"container_value", L"nested container example");
+            
+    logger.write(LogLevel::Information,
+              fmt::format(L"data serialize:\n{}", data2.serialize()), start);
+    logger.write(LogLevel::Information,
+              fmt::format(L"data xml:\n{}", data2.to_xml()), start);
+    logger.write(LogLevel::Information,
+              fmt::format(L"data json:\n{}", data2.to_json()), start);
 
-	start = logger::handle().chrono_start();
-	value_container data3(data2);
-	data3.remove(L"false_value");
-	data3.remove(L"true_value");
-	data3.remove(L"float_value");
-	data3.remove(L"double_value");
-	data3.remove(L"container_value");
-	logger::handle().write(
-		logging_level::information,
-		fmt::format(L"data serialize:\n{}", data3.serialize()), start);
-	logger::handle().write(logging_level::information,
-						   fmt::format(L"data xml:\n{}", data3.to_xml()),
-						   start);
-	logger::handle().write(logging_level::information,
-						   fmt::format(L"data json:\n{}", data3.to_json()),
-						   start);
+    start = logger.chrono_start();
+    SimpleContainer data3 = data2;
+    data3.remove(L"false_value");
+    data3.remove(L"true_value");
+    data3.remove(L"float_value");
+    data3.remove(L"double_value");
+    data3.remove(L"container_value");
+    
+    logger.write(LogLevel::Information,
+              fmt::format(L"data serialize:\n{}", data3.serialize()), start);
+    logger.write(LogLevel::Information,
+              fmt::format(L"data xml:\n{}", data3.to_xml()), start);
+    logger.write(LogLevel::Information,
+              fmt::format(L"data json:\n{}", data3.to_json()), start);
 
-	logger::handle().stop();
+    logger.stop();
 
-	return 0;
+    return 0;
 }
 
 bool parse_arguments(argument_manager& arguments)
 {
-	wstring temp;
+    std::wstring temp;
 
-	auto string_target = arguments.to_string(L"--help");
-	if (string_target != nullopt)
-	{
-		display_help();
+    auto string_target = arguments.to_string("--help");
+    if (string_target.has_value())
+    {
+        display_help();
+        return false;
+    }
 
-		return false;
-	}
+    auto int_target = arguments.to_int("--logging_level");
+    if (int_target.has_value())
+    {
+        int level = int_target.value();
+        if (level >= 0 && level <= 4) {
+            log_level = static_cast<LogLevel>(level);
+        }
+    }
 
-	auto int_target = arguments.to_int(L"--logging_level");
-	if (int_target != nullopt)
-	{
-		log_level = (logging_level)*int_target;
-	}
+    auto bool_target = arguments.to_bool("--write_console_only");
+    if (bool_target.has_value() && bool_target.value())
+    {
+        log_style = LogStyle::ConsoleOnly;
+        return true;
+    }
 
-	auto bool_target = arguments.to_bool(L"--write_console_only");
-	if (bool_target != nullopt && *bool_target)
-	{
-		logging_style = logging_styles::console_only;
+    bool_target = arguments.to_bool("--write_console");
+    if (bool_target.has_value() && bool_target.value())
+    {
+        log_style = LogStyle::FileAndConsole;
+        return true;
+    }
 
-		return true;
-	}
-
-	bool_target = arguments.to_bool(L"--write_console");
-	if (bool_target != nullopt && *bool_target)
-	{
-		logging_style = logging_styles::file_and_console;
-
-		return true;
-	}
-
-	logging_style = logging_styles::file_only;
-
-	return true;
+    log_style = LogStyle::FileOnly;
+    return true;
 }
 
 void display_help(void)
 {
-	wcout << L"container sample options:" << endl << endl;
-	wcout << L"--write_console [value] " << endl;
-	wcout << L"\tThe write_console_mode on/off. If you want to display log on "
-			 L"console must be appended '--write_console true'.\n\tInitialize "
-			 L"value is --write_console off."
-		  << endl
-		  << endl;
-	wcout << L"--logging_level [value]" << endl;
-	wcout << L"\tIf you want to change log level must be appended "
-			 L"'--logging_level [level]'."
-		  << endl;
+    std::wcout << L"Container sample options:" << std::endl << std::endl;
+    std::wcout << L"--write_console [value] " << std::endl;
+    std::wcout << L"\tThe write_console_mode on/off. If you want to display log on "
+            L"console must be appended '--write_console true'.\n\tInitialize "
+            L"value is --write_console off."
+        << std::endl
+        << std::endl;
+    std::wcout << L"--logging_level [value]" << std::endl;
+    std::wcout << L"\tIf you want to change log level must be appended "
+            L"'--logging_level [level]'."
+        << std::endl;
 }

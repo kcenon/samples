@@ -1,4 +1,4 @@
-﻿/*****************************************************************************
+/*****************************************************************************
 BSD 3-Clause License
 
 Copyright (c) 2021, 🍀☀🌕🌥 🌊
@@ -31,240 +31,313 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *****************************************************************************/
 
 #include <iostream>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+#include <chrono>
+#include <functional>
+#include <mutex>
+#include <queue>
+#include <condition_variable>
 
-#include "job.h"
-#include "job_pool.h"
-#include "logging.h"
-#include "thread_pool.h"
-#include "thread_worker.h"
-
-#include "converting.h"
+#include "fmt/format.h"
+#include "fmt/xchar.h"
 
 #include "argument_parser.h"
 
-#include "fmt/format.h"
-
 constexpr auto PROGRAM_NAME = L"thread_sample";
 
-using namespace logging;
-using namespace threads;
-using namespace converting;
-using namespace argument_parser;
+using namespace utility_module;
+
+// Define simple thread priority levels
+enum class Priority { Low, Normal, High };
+
+// Simple logger for the sample
+enum class LogLevel { Debug, Information, Warning, Error, Parameter };
+enum class LogStyle { ConsoleOnly, FileOnly, FileAndConsole };
 
 #ifdef _DEBUG
-logging_level log_level = logging_level::parameter;
-logging_styles logging_style = logging_styles::console_only;
+LogLevel log_level = LogLevel::Parameter;
+LogStyle log_style = LogStyle::ConsoleOnly;
 #else
-logging_level log_level = logging_level::information;
-logging_styles logging_style = logging_styles::file_only;
+LogLevel log_level = LogLevel::Information;
+LogStyle log_style = LogStyle::FileOnly;
 #endif
+
+// Simple logger implementation
+class SimpleLogger {
+private:
+    LogLevel level_;
+    LogStyle style_;
+    std::wstring name_;
+    bool active_ = false;
+    std::mutex log_mutex_;
+
+public:
+    SimpleLogger() : level_(LogLevel::Information), style_(LogStyle::ConsoleOnly) {}
+    
+    void set_level(LogLevel level) { level_ = level; }
+    void set_style(LogStyle style) { style_ = style; }
+    
+    void start(const std::wstring& name) {
+        name_ = name;
+        active_ = true;
+        write(LogLevel::Information, L"Logger started");
+    }
+    
+    void stop() {
+        if (active_) {
+            write(LogLevel::Information, L"Logger stopped");
+            active_ = false;
+        }
+    }
+    
+    void write(LogLevel msg_level, const std::wstring& message) {
+        if (!active_ || msg_level < level_) return;
+        
+        if (style_ != LogStyle::FileOnly) {
+            std::lock_guard<std::mutex> lock(log_mutex_);
+            std::wcout << get_level_prefix(msg_level) << message << std::endl;
+        }
+    }
+    
+private:
+    std::wstring get_level_prefix(LogLevel level) {
+        switch (level) {
+            case LogLevel::Debug: return L"[DEBUG] ";
+            case LogLevel::Information: return L"[INFO] ";
+            case LogLevel::Warning: return L"[WARN] ";
+            case LogLevel::Error: return L"[ERROR] ";
+            case LogLevel::Parameter: return L"[PARAM] ";
+            default: return L"[UNKNOWN] ";
+        }
+    }
+};
+
+// Simple job class
+class Job {
+public:
+    using JobFunction = std::function<void()>;
+    
+    Job(Priority priority, JobFunction func) 
+        : priority_(priority), function_(func) {}
+    
+    void execute() {
+        if (function_) {
+            function_();
+        }
+    }
+    
+    Priority get_priority() const { return priority_; }
+    
+private:
+    Priority priority_;
+    JobFunction function_;
+};
+
+// Simple thread pool implementation
+class ThreadPool {
+private:
+    std::vector<std::thread> workers_;
+    std::queue<std::shared_ptr<Job>> jobs_;
+    std::mutex queue_mutex_;
+    std::condition_variable condition_;
+    bool stop_ = false;
+    SimpleLogger& logger_;
+
+public:
+    ThreadPool(SimpleLogger& logger, size_t threads = 4) 
+        : logger_(logger) {
+        for (size_t i = 0; i < threads; ++i) {
+            workers_.emplace_back([this, i] {
+                worker_loop(i);
+            });
+        }
+    }
+    
+    ~ThreadPool() {
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex_);
+            stop_ = true;
+        }
+        
+        condition_.notify_all();
+        for (auto& worker : workers_) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+    }
+    
+    void push_job(std::shared_ptr<Job> job) {
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex_);
+            jobs_.push(job);
+        }
+        condition_.notify_one();
+    }
+    
+private:
+    void worker_loop(size_t worker_id) {
+        while (true) {
+            std::shared_ptr<Job> job;
+            {
+                std::unique_lock<std::mutex> lock(queue_mutex_);
+                condition_.wait(lock, [this] { 
+                    return stop_ || !jobs_.empty(); 
+                });
+                
+                if (stop_ && jobs_.empty()) {
+                    return;
+                }
+                
+                job = jobs_.front();
+                jobs_.pop();
+            }
+            
+            if (job) {
+                logger_.write(LogLevel::Information, 
+                    fmt::format(L"Worker {} executing job with priority {}", 
+                        worker_id, static_cast<int>(job->get_priority())));
+                
+                job->execute();
+            }
+        }
+    }
+};
 
 bool parse_arguments(argument_manager& arguments);
 void display_help(void);
 
-void write_data(const vector<unsigned char>& data)
-{
-	logger::handle().write(logging_level::information,
-						   converter::to_wstring(data));
-}
-
-void write_high(void)
-{
-	write_data(converter::to_array(L"테스트2_high_in_thread"));
-}
-
-void write_normal(void)
-{
-	write_data(converter::to_array(L"테스트2_normal_in_thread"));
-}
-
-void write_low(void)
-{
-	write_data(converter::to_array(L"테스트2_low_in_thread"));
-}
-
-class saving_test_job : public job
-{
-public:
-	saving_test_job(const priorities& priority,
-					const vector<unsigned char>& data)
-		: job(priority, data)
-	{
-		save(L"thread_sample");
-	}
-
-protected:
-	void working(const priorities& worker_priority) override
-	{
-		logger::handle().write(logging_level::information,
-							   converter::to_wstring(_data));
-	}
-};
-
-class test_job_without_data : public job
-{
-public:
-	test_job_without_data(const priorities& priority) : job(priority) {}
-
-protected:
-	void working(const priorities& worker_priority) override
-	{
-		auto pool = _job_pool.lock();
-		if (pool != nullptr)
-		{
-			pool->push(make_shared<job>(
-				priority(), converter::to_array(L"테스트5_in_thread"),
-				&write_data));
-		}
-
-		switch (priority())
-		{
-		case priorities::high:
-			logger::handle().write(logging_level::information,
-								   L"테스트4_high_in_thread");
-			break;
-		case priorities::normal:
-			logger::handle().write(logging_level::information,
-								   L"테스트4_normal_in_thread");
-			break;
-		case priorities::low:
-			logger::handle().write(logging_level::information,
-								   L"테스트4_low_in_thread");
-			break;
-		default:
-			break;
-		}
-	}
-};
-
 int main(int argc, char* argv[])
 {
-	argument_manager arguments(argc, argv);
-	if (!parse_arguments(arguments))
-	{
-		return 0;
-	}
+    std::wcout << L"Threads sample starting..." << std::endl;
+    
+    // Set defaults
+    log_level = LogLevel::Information;
+    log_style = LogStyle::ConsoleOnly;
+    
+    if (argc > 1) {
+        argument_manager arguments;
+        auto result = arguments.try_parse(argc, argv);
+        if (result.has_value()) {
+            std::wcout << L"Argument parsing failed: " << std::wstring(result.value().begin(), result.value().end()) << std::endl;
+            return 0;
+        }
+        
+        if (!parse_arguments(arguments)) {
+            return 0;
+        }
+    } else {
+        std::wcout << L"No arguments provided, using defaults" << std::endl;
+    }
+    
+    std::wcout << L"Creating logger..." << std::endl;
+    SimpleLogger logger;
+    logger.set_level(log_level);
+    logger.set_style(log_style);
+    logger.start(PROGRAM_NAME);
 
-	logger::handle().set_write_console(logging_style);
-	logger::handle().set_target_level(log_level);
-#ifdef _WIN32
-	logger::handle().start(PROGRAM_NAME, locale("ko_KR.UTF-8"));
-#else
-	logger::handle().start(PROGRAM_NAME);
-#endif
-
-	thread_pool manager;
-	manager.append(make_shared<thread_worker>(priorities::high));
-	manager.append(make_shared<thread_worker>(priorities::high));
-	manager.append(make_shared<thread_worker>(priorities::high));
-	manager.append(make_shared<thread_worker>(
-		priorities::normal, vector<priorities>{ priorities::high }));
-	manager.append(make_shared<thread_worker>(
-		priorities::normal, vector<priorities>{ priorities::high }));
-	manager.append(make_shared<thread_worker>(
-		priorities::low,
-		vector<priorities>{ priorities::high, priorities::normal }));
-
-	// unit job with callback and data
-	for (unsigned int log_index = 0; log_index < 1000; ++log_index)
-	{
-		manager.push(make_shared<job>(
-			priorities::high, converter::to_array(L"테스트_high_in_thread"),
-			&write_data));
-		manager.push(make_shared<job>(
-			priorities::normal, converter::to_array(L"테스트_normal_in_thread"),
-			&write_data));
-		manager.push(make_shared<job>(
-			priorities::low, converter::to_array(L"테스트_low_in_thread"),
-			&write_data));
-	}
-
-	// unit job with callback
-	for (unsigned int log_index = 0; log_index < 1000; ++log_index)
-	{
-		manager.push(make_shared<job>(priorities::high, &write_high));
-		manager.push(make_shared<job>(priorities::normal, &write_normal));
-		manager.push(make_shared<job>(priorities::low, &write_low));
-	}
-
-	// derived job with data
-	for (unsigned int log_index = 0; log_index < 1000; ++log_index)
-	{
-		manager.push(make_shared<saving_test_job>(
-			priorities::high, converter::to_array(L"테스트3_high_in_thread")));
-		manager.push(make_shared<saving_test_job>(
-			priorities::normal,
-			converter::to_array(L"테스트3_normal_in_thread")));
-		manager.push(make_shared<saving_test_job>(
-			priorities::low, converter::to_array(L"테스트3_low_in_thread")));
-	}
-
-	// derived job without data
-	for (unsigned int log_index = 0; log_index < 1000; ++log_index)
-	{
-		manager.push(make_shared<test_job_without_data>(priorities::high));
-		manager.push(make_shared<test_job_without_data>(priorities::normal));
-		manager.push(make_shared<test_job_without_data>(priorities::low));
-	}
-
-	manager.start();
-	manager.stop(false);
-
-	logger::handle().stop();
-
-	return 0;
+    // Create thread pool with 6 threads
+    ThreadPool pool(logger, 6);
+    
+    // Example text data we'll use in jobs
+    std::vector<std::wstring> test_messages = {
+        L"Task 1 - High priority", 
+        L"Task 2 - Normal priority", 
+        L"Task 3 - Low priority"
+    };
+    
+    // Add some jobs of various priorities
+    for (int i = 0; i < 10; ++i) {
+        // High priority jobs
+        pool.push_job(std::make_shared<Job>(
+            Priority::High, 
+            [&logger, i, &test_messages]() {
+                logger.write(LogLevel::Information, 
+                    fmt::format(L"High Priority Job {}: {}", i, test_messages[0]));
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        ));
+        
+        // Normal priority jobs
+        pool.push_job(std::make_shared<Job>(
+            Priority::Normal, 
+            [&logger, i, &test_messages]() {
+                logger.write(LogLevel::Information, 
+                    fmt::format(L"Normal Priority Job {}: {}", i, test_messages[1]));
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        ));
+        
+        // Low priority jobs
+        pool.push_job(std::make_shared<Job>(
+            Priority::Low, 
+            [&logger, i, &test_messages]() {
+                logger.write(LogLevel::Information, 
+                    fmt::format(L"Low Priority Job {}: {}", i, test_messages[2]));
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        ));
+    }
+    
+    // Wait a bit to let jobs run
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    
+    logger.stop();
+    return 0;
 }
 
 bool parse_arguments(argument_manager& arguments)
 {
-	wstring temp;
+    std::wstring temp;
 
-	auto string_target = arguments.to_string(L"--help");
-	if (string_target != nullopt)
-	{
-		display_help();
+    auto string_target = arguments.to_string("--help");
+    if (string_target.has_value())
+    {
+        display_help();
+        return false;
+    }
 
-		return false;
-	}
+    auto int_target = arguments.to_int("--logging_level");
+    if (int_target.has_value())
+    {
+        int level = int_target.value();
+        if (level >= 0 && level <= 4) {
+            log_level = static_cast<LogLevel>(level);
+        }
+    }
 
-	auto int_target = arguments.to_int(L"--logging_level");
-	if (int_target != nullopt)
-	{
-		log_level = (logging_level)*int_target;
-	}
+    auto bool_target = arguments.to_bool("--write_console_only");
+    if (bool_target.has_value() && bool_target.value())
+    {
+        log_style = LogStyle::ConsoleOnly;
+        return true;
+    }
 
-	auto bool_target = arguments.to_bool(L"--write_console_only");
-	if (bool_target != nullopt && *bool_target)
-	{
-		logging_style = logging_styles::console_only;
+    bool_target = arguments.to_bool("--write_console");
+    if (bool_target.has_value() && bool_target.value())
+    {
+        log_style = LogStyle::FileAndConsole;
+        return true;
+    }
 
-		return true;
-	}
-
-	bool_target = arguments.to_bool(L"--write_console");
-	if (bool_target != nullopt && *bool_target)
-	{
-		logging_style = logging_styles::file_and_console;
-
-		return true;
-	}
-
-	logging_style = logging_styles::file_only;
-
-	return true;
+    log_style = LogStyle::FileOnly;
+    return true;
 }
 
 void display_help(void)
 {
-	wcout << L"download sample options:" << endl << endl;
-	wcout << L"--write_console [value] " << endl;
-	wcout << L"\tThe write_console_mode on/off. If you want to display log on "
-			 L"console must be appended '--write_console true'.\n\tInitialize "
-			 L"value is --write_console off."
-		  << endl
-		  << endl;
-	wcout << L"--logging_level [value]" << endl;
-	wcout << L"\tIf you want to change log level must be appended "
-			 L"'--logging_level [level]'."
-		  << endl;
+    std::wcout << L"Thread sample options:" << std::endl << std::endl;
+    std::wcout << L"--write_console [value] " << std::endl;
+    std::wcout << L"\tThe write_console_mode on/off. If you want to display log on "
+            L"console must be appended '--write_console true'.\n\tInitialize "
+            L"value is --write_console off."
+        << std::endl
+        << std::endl;
+    std::wcout << L"--logging_level [value]" << std::endl;
+    std::wcout << L"\tIf you want to change log level must be appended "
+            L"'--logging_level [level]'."
+        << std::endl;
 }

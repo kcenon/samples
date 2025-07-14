@@ -1,4 +1,4 @@
-﻿/*****************************************************************************
+/*****************************************************************************
 BSD 3-Clause License
 
 Copyright (c) 2021, 🍀☀🌕🌥 🌊
@@ -30,414 +30,251 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *****************************************************************************/
 
-#include <future>
 #include <iostream>
 #include <memory>
-#include <stdlib.h>
 #include <string>
+#include <thread>
+#include <chrono>
+#include <unordered_map>
+#include <functional>
+#include <vector>
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 
-#include "argument_parser.h"
-#include "converting.h"
-#include "file_handler.h"
-#include "job.h"
-#include "job_pool.h"
-#include "logging.h"
-#include "messaging_client.h"
-
-#include "container.h"
-#include "values/container_value.h"
-#include "values/string_value.h"
+#include "utilities/parsing/argument_parser.h"
+#include "container/container.h"
+#include "network/network.h"
 
 #include "fmt/format.h"
 #include "fmt/xchar.h"
 
 constexpr auto PROGRAM_NAME = L"echo_client";
 
-using namespace std;
-using namespace logging;
-using namespace threads;
-using namespace network;
-using namespace container;
-using namespace converting;
-using namespace file_handler;
-using namespace argument_parser;
+using namespace utility_module;
+using namespace container_module;
+using namespace network_module;
 
-bool encrypt_mode = false;
-bool compress_mode = false;
-bool binary_mode = false;
-unsigned short compress_block_size = 1024;
+// Simple logger
+enum class LogLevel { Debug, Information, Warning, Error, Parameter };
+enum class LogStyle { ConsoleOnly, FileOnly, FileAndConsole };
+
 #ifdef _DEBUG
-logging_level log_level = logging_level::parameter;
-logging_styles logging_style = logging_styles::console_only;
+LogLevel log_level = LogLevel::Parameter;
+LogStyle log_style = LogStyle::ConsoleOnly;
 #else
-logging_level log_level = logging_level::information;
-logging_styles logging_style = logging_styles::file_only;
+LogLevel log_level = LogLevel::Information;
+LogStyle log_style = LogStyle::FileOnly;
 #endif
-wstring connection_key = L"echo_network";
-wstring server_ip = L"127.0.0.1";
+
+// Configuration
+std::wstring server_ip = L"127.0.0.1";
 unsigned short server_port = 9876;
-unsigned short high_priority_count = 1;
-unsigned short normal_priority_count = 2;
-unsigned short low_priority_count = 3;
+bool running = true;
 
-shared_ptr<thread_pool> _thread_pool = nullptr;
+// Enhanced network client using messaging_system
+class EchoClient {
+private:
+    std::shared_ptr<messaging_client> client_;
+    std::atomic<bool> connected_ = false;
+    std::atomic<bool> running_ = false;
+    std::string client_id_;
+    std::mutex message_mutex_;
 
-map<wstring, function<void(const vector<uint8_t>&)>> _registered_messages;
+public:
+    EchoClient(const std::string& client_id) : client_id_(client_id) {
+        client_ = std::make_shared<messaging_client>(client_id_);
+    }
+    
+    ~EchoClient() {
+        stop();
+    }
+    
+    void start(const std::string& server_ip, unsigned short server_port) {
+        if (running_) return;
+        
+        running_ = true;
+        std::wcout << fmt::format(L"[INFO] Starting client and connecting to {}:{}", 
+                                 std::wstring(server_ip.begin(), server_ip.end()), server_port) << std::endl;
+        
+        client_->start_client(server_ip, server_port);
+        
+        // Wait a moment for connection
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        connected_ = true;
+        
+        std::wcout << fmt::format(L"[INFO] Connected to {}:{}", 
+                                 std::wstring(server_ip.begin(), server_ip.end()), server_port) << std::endl;
+    }
+    
+    void stop() {
+        if (!running_) return;
+        
+        running_ = false;
+        connected_ = false;
+        
+        if (client_) {
+            client_->stop_client();
+        }
+        
+        std::wcout << L"[INFO] Client stopped" << std::endl;
+    }
+    
+    bool is_connected() const {
+        return connected_ && running_;
+    }
+    
+    void send_echo_message(const std::string& message) {
+        if (!is_connected()) {
+            std::wcout << L"[WARNING] Not connected, cannot send message" << std::endl;
+            return;
+        }
+        
+        std::lock_guard<std::mutex> lock(message_mutex_);
+        
+        // Create container with echo message
+        auto msg_container = std::make_shared<container_module::value_container>();
+        msg_container->set_source(client_id_, "echo_client");
+        msg_container->set_target("echo_server", "main");
+        msg_container->set_message_type("echo_request");
+        
+        // Add message content
+        auto message_value = std::make_shared<container_module::value>("message", container_module::value_types::string_value, message);
+        auto timestamp_value = std::make_shared<container_module::value>("timestamp", container_module::value_types::string_value, 
+            std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()));
+        
+        msg_container->add(message_value);
+        msg_container->add(timestamp_value);
+        
+        // Serialize and send
+        std::string serialized = msg_container->serialize();
+        std::vector<uint8_t> data(serialized.begin(), serialized.end());
+        
+        client_->send_packet(data);
+        
+        std::wcout << fmt::format(L"[INFO] Sent echo message: {}", 
+                                 std::wstring(message.begin(), message.end())) << std::endl;
+    }
+};
 
-optional<promise<bool>> _promise_status;
-future<bool> _future_status;
-shared_ptr<messaging_client> _client = nullptr;
-
+// Argument parsing
 bool parse_arguments(argument_manager& arguments);
 void display_help(void);
 
-void create_client(void);
-void create_thread_pool(void);
-void send_echo_test_message(const wstring& target_id,
-							const wstring& target_sub_id);
-void connection(const wstring& target_id,
-				const wstring& target_sub_id,
-				const bool& condition);
-void received_message(shared_ptr<container::value_container> container);
-void received_binary_message(const wstring& source_id,
-							 const wstring& source_sub_id,
-							 const wstring& target_id,
-							 const wstring& target_sub_id,
-							 const vector<uint8_t>& data);
-void received_echo_test(const vector<uint8_t>& data);
-
 int main(int argc, char* argv[])
 {
-	argument_manager arguments(argc, argv);
-	if (!parse_arguments(arguments))
-	{
-		return 0;
-	}
-
-	logger::handle().set_write_console(logging_style);
-	logger::handle().set_target_level(log_level);
-#ifdef _WIN32
-	logger::handle().start(PROGRAM_NAME, locale("ko_KR.UTF-8"));
-#else
-	logger::handle().start(PROGRAM_NAME);
-#endif
-
-	_registered_messages.insert({ L"echo_test", received_echo_test });
-
-	create_thread_pool();
-
-	create_client();
-
-	_promise_status = { promise<bool>() };
-	_future_status = _promise_status.value().get_future();
-
-	_future_status.wait();
-	_promise_status.reset();
-
-	_thread_pool->stop();
-	_thread_pool.reset();
-
-	_client->stop();
-	_client.reset();
-
-	logger::handle().stop();
-
-	return 0;
+    std::wcout << L"Echo Client starting..." << std::endl;
+    
+    // Set defaults
+    log_level = LogLevel::Information;
+    log_style = LogStyle::ConsoleOnly;
+    
+    if (argc > 1) {
+        argument_manager arguments;
+        auto result = arguments.try_parse(argc, argv);
+        if (result.has_value()) {
+            std::wcout << L"Argument parsing failed: " << std::wstring(result.value().begin(), result.value().end()) << std::endl;
+            return 0;
+        }
+        
+        if (!parse_arguments(arguments)) {
+            return 0;
+        }
+    } else {
+        std::wcout << L"No arguments provided, using defaults" << std::endl;
+    }
+    
+    // Create and start client
+    EchoClient client("echo_client_001");
+    
+    // Convert wstring to string for the client
+    std::string server_ip_str(server_ip.begin(), server_ip.end());
+    client.start(server_ip_str, server_port);
+    
+    // Check connection
+    if (!client.is_connected()) {
+        std::wcout << L"Failed to connect to server" << std::endl;
+        return 1;
+    }
+    
+    // Main message loop - sends an echo message every 2 seconds
+    int messageCount = 0;
+    while (running && messageCount < 5) {
+        std::string message = fmt::format("Echo test message #{}", messageCount++);
+        client.send_echo_message(message);
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+    
+    std::wcout << L"Echo Client shutting down..." << std::endl;
+    client.stop();
+    
+    return 0;
 }
 
 bool parse_arguments(argument_manager& arguments)
 {
-	wstring temp;
-
-	auto string_target = arguments.to_string(L"--help");
-	if (string_target != nullopt)
-	{
-		display_help();
-
-		return false;
-	}
-
-	auto bool_target = arguments.to_bool(L"--encrypt_mode");
-	if (bool_target != nullopt)
-	{
-		encrypt_mode = *bool_target;
-	}
-
-	bool_target = arguments.to_bool(L"--compress_mode");
-	if (bool_target != nullopt)
-	{
-		compress_mode = *bool_target;
-	}
-
-	bool_target = arguments.to_bool(L"--binary_mode");
-	if (bool_target != nullopt)
-	{
-		binary_mode = *bool_target;
-	}
-
-	auto ushort_target = arguments.to_ushort(L"--compress_block_size");
-	if (ushort_target != nullopt)
-	{
-		compress_block_size = *ushort_target;
-	}
-
-	string_target = arguments.to_string(L"--connection_key");
-	if (string_target != nullopt)
-	{
-		temp = converter::to_wstring(file::load(*string_target));
-		if (!temp.empty())
-		{
-			connection_key = temp;
-		}
-	}
-
-	ushort_target = arguments.to_ushort(L"--server_port");
-	if (ushort_target != nullopt)
-	{
-		server_port = *ushort_target;
-	}
-
-	ushort_target = arguments.to_ushort(L"--high_priority_count");
-	if (ushort_target != nullopt)
-	{
-		high_priority_count = *ushort_target;
-	}
-
-	ushort_target = arguments.to_ushort(L"--normal_priority_count");
-	if (ushort_target != nullopt)
-	{
-		normal_priority_count = *ushort_target;
-	}
-
-	ushort_target = arguments.to_ushort(L"--low_priority_count");
-	if (ushort_target != nullopt)
-	{
-		low_priority_count = *ushort_target;
-	}
-
-	auto int_target = arguments.to_int(L"--logging_level");
-	if (int_target != nullopt)
-	{
-		log_level = (logging_level)*int_target;
-	}
-
-	bool_target = arguments.to_bool(L"--write_console_only");
-	if (bool_target != nullopt && *bool_target)
-	{
-		logging_style = logging_styles::console_only;
-
-		return true;
-	}
-
-	bool_target = arguments.to_bool(L"--write_console");
-	if (bool_target != nullopt && *bool_target)
-	{
-		logging_style = logging_styles::file_and_console;
-
-		return true;
-	}
-
-	logging_style = logging_styles::file_only;
-
-	return true;
+    auto string_target = arguments.to_string("--help");
+    if (string_target.has_value())
+    {
+        display_help();
+        return false;
+    }
+    
+    auto int_target = arguments.to_int("--logging_level");
+    if (int_target.has_value())
+    {
+        int level = int_target.value();
+        if (level >= 0 && level <= 4) {
+            log_level = static_cast<LogLevel>(level);
+        }
+    }
+    
+    string_target = arguments.to_string("--server_ip");
+    if (string_target.has_value())
+    {
+        server_ip = std::wstring(string_target.value().begin(), string_target.value().end());
+    }
+    
+    auto ushort_target = arguments.to_ushort("--server_port");
+    if (ushort_target.has_value())
+    {
+        server_port = ushort_target.value();
+    }
+    
+    auto bool_target = arguments.to_bool("--write_console_only");
+    if (bool_target.has_value() && bool_target.value())
+    {
+        log_style = LogStyle::ConsoleOnly;
+        return true;
+    }
+    
+    bool_target = arguments.to_bool("--write_console");
+    if (bool_target.has_value() && bool_target.value())
+    {
+        log_style = LogStyle::FileAndConsole;
+        return true;
+    }
+    
+    log_style = LogStyle::FileOnly;
+    return true;
 }
 
 void display_help(void)
 {
-	wcout << L"pathfinder connector options:" << endl << endl;
-	wcout << L"--write_console [value] " << endl;
-	wcout << L"\tThe write_console_mode on/off. If you want to display log on "
-			 L"console must be appended '--write_console true'.\n\tInitialize "
-			 L"value is --write_console off."
-		  << endl
-		  << endl;
-	wcout << L"--logging_level [value]" << endl;
-	wcout << L"\tIf you want to change log level must be appended "
-			 L"'--logging_level [level]'."
-		  << endl;
-}
-
-void create_client(void)
-{
-	if (_client != nullptr)
-	{
-		_client.reset();
-	}
-
-	_client = make_shared<messaging_client>(PROGRAM_NAME);
-	_client->set_encrypt_mode(encrypt_mode);
-	_client->set_compress_mode(compress_mode);
-	_client->set_compress_block_size(compress_block_size);
-	_client->set_connection_key(connection_key);
-	_client->set_connection_notification(&connection);
-	if (binary_mode)
-	{
-		_client->set_binary_notification(&received_binary_message);
-		_client->set_session_types({ session_types::binary_line });
-	}
-	else
-	{
-		_client->set_message_notification(&received_message);
-		_client->set_session_types({ session_types::message_line });
-	}
-	_client->start(server_ip, server_port, high_priority_count,
-				   normal_priority_count, low_priority_count);
-}
-
-void create_thread_pool(void)
-{
-	if (_thread_pool != nullptr)
-	{
-		_thread_pool.reset();
-	}
-
-	_thread_pool = make_shared<thread_pool>();
-	for (unsigned short high = 0; high < high_priority_count; ++high)
-	{
-		_thread_pool->append(make_shared<thread_worker>(priorities::high));
-	}
-	for (unsigned short normal = 0; normal < normal_priority_count; ++normal)
-	{
-		_thread_pool->append(make_shared<thread_worker>(
-			priorities::normal, vector<priorities>{ priorities::high }));
-	}
-	for (unsigned short low = 0; low < low_priority_count; ++low)
-	{
-		_thread_pool->append(make_shared<thread_worker>(
-			priorities::low,
-			vector<priorities>{ priorities::high, priorities::normal }));
-	}
-	_thread_pool->start();
-}
-
-void send_echo_test_message(const wstring& target_id,
-							const wstring& target_sub_id)
-{
-	if (binary_mode)
-	{
-		_client->send_binary(target_id, target_sub_id,
-							 converter::to_array(L"echo_test"));
-
-		return;
-	}
-
-	shared_ptr<container::value_container> container
-		= make_shared<container::value_container>(target_id, target_sub_id,
-												  L"echo_test",
-												  vector<shared_ptr<value>>{});
-
-	_client->send(container);
-}
-
-void connection(const wstring& target_id,
-				const wstring& target_sub_id,
-				const bool& condition)
-{
-	logger::handle().write(
-		logging_level::information,
-		fmt::format(L"an echo_client({}[{}]) is {} an echo_server", target_id,
-					target_sub_id,
-					condition ? L"connected to" : L"disconnected from"));
-
-	if (condition)
-	{
-		send_echo_test_message(target_id, target_sub_id);
-
-		return;
-	}
-
-	if (_promise_status.has_value())
-	{
-		_promise_status.value().set_value(false);
-	}
-}
-
-void received_message(shared_ptr<container::value_container> container)
-{
-	if (container == nullptr)
-	{
-		return;
-	}
-
-	auto message_type = _registered_messages.find(container->message_type());
-	if (message_type != _registered_messages.end())
-	{
-		if (_thread_pool)
-		{
-			_thread_pool->push(make_shared<job>(
-				priorities::high, converter::to_array(container->serialize()),
-				message_type->second));
-		}
-
-		return;
-	}
-
-	logger::handle().write(
-		logging_level::sequence,
-		fmt::format(L"unknown message: {}", container->serialize()));
-
-	if (_promise_status.has_value())
-	{
-		_promise_status.value().set_value(false);
-	}
-}
-
-void received_binary_message(const wstring& source_id,
-							 const wstring& source_sub_id,
-							 const wstring& target_id,
-							 const wstring& target_sub_id,
-							 const vector<uint8_t>& data)
-{
-	if (data.empty())
-	{
-		if (_promise_status.has_value())
-		{
-			_promise_status.value().set_value(false);
-		}
-
-		return;
-	}
-
-	logger::handle().write(
-		logging_level::sequence,
-		fmt::format(L"received message: {}", converter::to_wstring(data)));
-
-	if (_promise_status.has_value())
-	{
-		_promise_status.value().set_value(true);
-	}
-}
-
-void received_echo_test(const vector<uint8_t>& data)
-{
-	if (data.empty())
-	{
-		if (_promise_status.has_value())
-		{
-			_promise_status.value().set_value(false);
-		}
-
-		return;
-	}
-
-	shared_ptr<container::value_container> container
-		= make_shared<container::value_container>(data, false);
-	if (container == nullptr)
-	{
-		if (_promise_status.has_value())
-		{
-			_promise_status.value().set_value(false);
-		}
-
-		return;
-	}
-
-	logger::handle().write(
-		logging_level::sequence,
-		fmt::format(L"received message: {}", container->message_type()));
-
-	if (_promise_status.has_value())
-	{
-		_promise_status.value().set_value(true);
-	}
+    std::wcout << L"Echo Client options:" << std::endl << std::endl;
+    std::wcout << L"--server_ip [value]" << std::endl;
+    std::wcout << L"\tSpecify the server IP address. Default is 127.0.0.1" << std::endl << std::endl;
+    std::wcout << L"--server_port [value]" << std::endl;
+    std::wcout << L"\tSpecify the server port. Default is 9876" << std::endl << std::endl;
+    std::wcout << L"--write_console [value] " << std::endl;
+    std::wcout << L"\tThe write_console_mode on/off. If you want to display log on "
+             L"console must be appended '--write_console true'.\n\tInitialize "
+             L"value is --write_console off."
+          << std::endl
+          << std::endl;
+    std::wcout << L"--logging_level [value]" << std::endl;
+    std::wcout << L"\tIf you want to change log level must be appended "
+             L"'--logging_level [level]'."
+          << std::endl;
 }
