@@ -43,18 +43,16 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <mutex>
 #include <signal.h>
 
-#include "utilities/parsing/argument_parser.h"
-#include "container/container.h"
-#include "network/network.h"
 
+#include "network_system/core/messaging_server.h"
+#include "container/container.h"
 #include "fmt/format.h"
 #include "fmt/xchar.h"
 
 constexpr auto PROGRAM_NAME = L"echo_server";
 
-using namespace utility_module;
+using namespace network_system::core;
 using namespace container_module;
-using namespace network_module;
 
 // Simple logger
 enum class LogLevel { Debug, Information, Warning, Error, Parameter };
@@ -205,10 +203,6 @@ public:
     }
 };
 
-// Argument parsing
-bool parse_arguments(argument_manager& arguments);
-void display_help(void);
-
 // Signal handling
 EchoServer* g_server = nullptr;
 void signal_callback(int signum);
@@ -224,21 +218,8 @@ int main(int argc, char* argv[])
     // Set up signal handling
     signal(SIGINT, signal_callback);
     signal(SIGTERM, signal_callback);
-    
-    if (argc > 1) {
-        argument_manager arguments;
-        auto result = arguments.try_parse(argc, argv);
-        if (result.has_value()) {
-            std::wcout << L"Argument parsing failed: " << std::wstring(result.value().begin(), result.value().end()) << std::endl;
-            return 0;
-        }
-        
-        if (!parse_arguments(arguments)) {
-            return 0;
-        }
-    } else {
-        std::wcout << L"No arguments provided, using defaults" << std::endl;
-    }
+
+    std::wcout << L"Using default configuration (port=8080, log_level=Information)" << std::endl;
     
     // Create and start server
     EchoServer server("echo_server");
@@ -255,64 +236,8 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-bool parse_arguments(argument_manager& arguments)
-{
-    auto string_target = arguments.to_string("--help");
-    if (string_target.has_value())
-    {
-        display_help();
-        return false;
-    }
-    
-    auto int_target = arguments.to_int("--logging_level");
-    if (int_target.has_value())
-    {
-        int level = int_target.value();
-        if (level >= 0 && level <= 4) {
-            log_level = static_cast<LogLevel>(level);
-        }
-    }
-    
-    auto ushort_target = arguments.to_ushort("--server_port");
-    if (ushort_target.has_value())
-    {
-        server_port = ushort_target.value();
-    }
-    
-    auto bool_target = arguments.to_bool("--write_console_only");
-    if (bool_target.has_value() && bool_target.value())
-    {
-        log_style = LogStyle::ConsoleOnly;
-        return true;
-    }
-    
-    bool_target = arguments.to_bool("--write_console");
-    if (bool_target.has_value() && bool_target.value())
-    {
-        log_style = LogStyle::FileAndConsole;
-        return true;
-    }
-    
-    log_style = LogStyle::FileOnly;
-    return true;
-}
-
-void display_help(void)
-{
-    std::wcout << L"Echo Server options:" << std::endl << std::endl;
-    std::wcout << L"--server_port [value]" << std::endl;
-    std::wcout << L"\tSpecify the server port. Default is 9876" << std::endl << std::endl;
-    std::wcout << L"--write_console [value] " << std::endl;
-    std::wcout << L"\tThe write_console_mode on/off. If you want to display log on "
-             L"console must be appended '--write_console true'.\n\tInitialize "
-             L"value is --write_console off."
-          << std::endl
-          << std::endl;
-    std::wcout << L"--logging_level [value]" << std::endl;
-    std::wcout << L"\tIf you want to change log level must be appended "
-             L"'--logging_level [level]'."
-          << std::endl;
-}
+// Argument parsing functions removed for simplicity
+// This is a simplified sample that uses default configuration
 
 void signal_callback(int signum)
 {

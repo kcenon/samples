@@ -1,20 +1,31 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 3.14)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.16)
 
 SET(PROGRAM_NAME echo_client)
-SET(CMAKE_CXX_STANDARD 20)
-SET(CMAKE_CXX_STANDARD_REQUIRED TRUE)
-
 PROJECT(${PROGRAM_NAME})
 
+# C++20 standard
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Create executable
 ADD_EXECUTABLE(${PROGRAM_NAME} echo_client.cpp)
 
-TARGET_INCLUDE_DIRECTORIES(${PROGRAM_NAME} PUBLIC 
-    ../messaging_system/thread_system/sources/utilities
-    ../messaging_system/thread_system/sources/utilities/parsing
-    ../messaging_system
-    ../messaging_system/container
-    ../messaging_system/network
+# Link against system libraries
+# This sample demonstrates messaging_system integration (client)
+# Note: These targets are provided by messaging_system's transitive dependencies
+TARGET_LINK_LIBRARIES(${PROGRAM_NAME} PRIVATE
+    messaging_system_core
+    LoggerSystem
+    NetworkSystem
+    container_system
+    utilities
+    fmt::fmt
+    Threads::Threads
 )
 
-ADD_DEPENDENCIES(${PROGRAM_NAME} utilities container network)
-TARGET_LINK_LIBRARIES(${PROGRAM_NAME} PUBLIC utilities container network fmt::fmt)
+# Set output directory
+set_target_properties(${PROGRAM_NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+message(STATUS "Configured ${PROGRAM_NAME}")
