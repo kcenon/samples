@@ -1,168 +1,160 @@
-﻿
-## How to use priority thread
+# Threads Sample
 
-Basically, this thread library can support thread handling with multi-workers to an inherited job and a callback function.
+## Overview
 
-### Sample code
+This sample demonstrates the thread_system features including:
 
-``` C++
-#include <iostream>
+- Priority-based thread pool with worker threads
+- Job scheduling with three priority levels (High, Normal, Low)
+- Multi-threaded task execution
+- Thread-safe job queue management
+- Worker affinity (workers can handle specific priority levels)
 
-#include "logging.h"
-#include "thread_pool.h"
-#include "thread_worker.h"
-#include "job_pool.h"
-#include "job.h"
+## Building
 
-#include "converting.h"
+```bash
+cd /path/to/samples
+mkdir -p build && cd build
+cmake .. -DSAMPLES_USE_LOCAL_SYSTEMS=ON
+make threads_sample
+```
 
-#include "argument_parsing.h"
+## Running
 
-#include "fmt/xchar.h"
-#include "fmt/format.h"
+```bash
+cd build
+./bin/threads_sample
+```
 
-constexpr auto PROGRAM_NAME = L"thread_sample";
+## Expected Output
 
-using namespace logging;
-using namespace converting;
-using namespace threads;
+```
+Threads sample starting...
+Using default configuration (log_level=Information, style=ConsoleOnly)
+Creating logger...
+[INFO] Logger started
+[INFO] Worker 3 executing job with priority 2
+[INFO] High Priority Job 0: Task 1 - High priority
+[INFO] Worker 5 executing job with priority 0
+[INFO] Low Priority Job 1: Task 3 - Low priority
+[INFO] Worker 1 executing job with priority 0
+[INFO] Low Priority Job 0: Task 3 - Low priority
+[INFO] Worker 4 executing job with priority 1
+[INFO] Normal Priority Job 1: Task 2 - Normal priority
+[INFO] Worker 0 executing job with priority 2
+[INFO] High Priority Job 1: Task 1 - High priority
+[INFO] Worker 2 executing job with priority 1
+[INFO] Normal Priority Job 0: Task 2 - Normal priority
+...
+[INFO] Logger stopped
+```
 
-bool write_console = false;
-logging_level log_level = logging_level::information;
+## Features Demonstrated
 
-bool write_data(const std::vector<unsigned char>& data)
-{
-    logger::handle().write(logging_level::information, converter::to_wstring(data));
+### 1. Thread Pool Creation
 
-    return true;
-}
+```cpp
+// Create thread pool with 6 workers
+auto pool = std::make_shared<kcenon::thread::thread_pool>("worker-pool", 6);
+pool->start();
+```
 
-bool write_high(void)
-{
-    return write_data(converter::to_array(L"test2_high_in_thread"));
-}
+### 2. Priority-Based Job Submission
 
-bool write_normal(void)
-{
-    return write_data(converter::to_array(L"test2_normal_in_thread"));
-}
-
-bool write_low(void)
-{
-    return write_data(converter::to_array(L"test2_low_in_thread"));
-}
-
-class saving_test_job : public job
-{
-public:
-    saving_test_job(const priorities& priority, const std::vector<unsigned char>& data) : job(priority, data)
-    {
-		save();
-    }
-
-protected:
-    bool working(const priorities& worker_priority) override
-    {
-        logger::handle().write(logging_level::information, converter::to_wstring(_data));
-
-        return true;
-    }
-};
-
-class test_job_without_data : public job
-{
-public:
-    test_job_without_data(const priorities& priority) : job(priority)
-    {
-    }
-
-protected:
-    bool working(const priorities& worker_priority) override
-    {
-        switch (priority())
-        {
-        case priorities::high: 
-            logger::handle().write(logging_level::information, 
-                L"test4_high_in_thread", start);
-            break;
-        case priorities::normal:
-            logger::handle().write(logging_level::information, 
-                L"test4_normal_in_thread", start);
-            break;
-        case priorities::low:
-            logger::handle().write(logging_level::information, 
-                L"test4_low_in_thread", start);
-            break;
+```cpp
+// High priority jobs (executed first)
+for (int i = 0; i < 10; ++i) {
+    auto job = std::make_shared<callback_job>(
+        priority_levels::high,
+        [i]() {
+            std::cout << "High Priority Job " << i << std::endl;
+            return true;
         }
+    );
+    pool->enqueue(job);
+}
 
-        return true;
-    }
-};
+// Normal priority jobs
+for (int i = 0; i < 10; ++i) {
+    auto job = std::make_shared<callback_job>(
+        priority_levels::normal,
+        [i]() {
+            std::cout << "Normal Priority Job " << i << std::endl;
+            return true;
+        }
+    );
+    pool->enqueue(job);
+}
 
-int main(int argc, char* argv[])
-{
-    logger::handle().set_write_console(write_console);
-    logger::handle().set_target_level(log_level);
-    logger::handle().start(PROGRAM_NAME);
-
-    // create thread_pool
-    thread_pool manager;
-    manager.append(std::make_shared<thread_worker>(priorities::high));
-    manager.append(std::make_shared<thread_worker>(priorities::high));
-    manager.append(std::make_shared<thread_worker>(priorities::high));
-    manager.append(std::make_shared<thread_worker>(priorities::normal, 
-        std::vector<priorities> { priorities::high }));
-    manager.append(std::make_shared<thread_worker>(priorities::normal, 
-        std::vector<priorities> { priorities::high }));
-    manager.append(std::make_shared<thread_worker>(priorities::low, 
-        std::vector<priorities> { priorities::high, priorities::normal }));
-	
-	// unit job with callback and data
-    for (unsigned int log_index = 0; log_index < 1000; ++log_index)
-    {
-        manager.push(std::make_shared<job>(priorities::high, 
-            converter::to_array(L"test_high_in_thread"), &write_data));
-        manager.push(std::make_shared<job>(priorities::normal, 
-            converter::to_array(L"test_normal_in_thread"), &write_data));
-        manager.push(std::make_shared<job>(priorities::low, 
-            converter::to_array(L"test_low_in_thread"), &write_data));
-    }
-
-	// unit job with callback
-    for (unsigned int log_index = 0; log_index < 1000; ++log_index)
-    {
-        manager.push(std::make_shared<job>(priorities::high, &write_high));
-        manager.push(std::make_shared<job>(priorities::normal, &write_normal));
-        manager.push(std::make_shared<job>(priorities::low, &write_low));
-    }
-
-	// derived job with data
-    for (unsigned int log_index = 0; log_index < 1000; ++log_index)
-    {
-        manager.push(std::make_shared<saving_test_job>(priorities::high, 
-            converter::to_array(L"test3_high_in_thread")));
-        manager.push(std::make_shared<saving_test_job>(priorities::normal, 
-            converter::to_array(L"test3_normal_in_thread")));
-        manager.push(std::make_shared<saving_test_job>(priorities::low, 
-            converter::to_array(L"test3_low_in_thread")));
-    }
-
-	// derived job without data
-    for (unsigned int log_index = 0; log_index < 1000; ++log_index)
-    {
-        manager.push(std::make_shared<test_job_without_data>(priorities::high));
-        manager.push(std::make_shared<test_job_without_data>(priorities::normal));
-        manager.push(std::make_shared<test_job_without_data>(priorities::low));
-    }
-
-    // If you want to check the thread-safe of priority job-pool, 
-    // you can call the below function before appending jobs.
-    manager.start();
-
-    manager.stop(false);
-
-    logger::handle().stop();
-
-    return 0;
+// Low priority jobs (executed last)
+for (int i = 0; i < 10; ++i) {
+    auto job = std::make_shared<callback_job>(
+        priority_levels::low,
+        [i]() {
+            std::cout << "Low Priority Job " << i << std::endl;
+            return true;
+        }
+    );
+    pool->enqueue(job);
 }
 ```
+
+### 3. Job Types
+
+The sample demonstrates different job types:
+
+- **Callback Jobs**: Jobs that wrap a lambda or function
+- **Custom Jobs**: Jobs that inherit from the `job` base class
+
+## Priority Levels
+
+- **High (2)**: Urgent tasks, executed first
+- **Normal (1)**: Standard tasks, executed after high priority
+- **Low (0)**: Background tasks, executed when higher priorities are done
+
+## Key Concepts
+
+- **Priority Queue**: Jobs are stored in a priority queue and executed based on priority
+- **Thread Pool**: Fixed number of worker threads process jobs from the queue
+- **Thread Safety**: All queue operations are thread-safe with lock-free implementation
+- **Fair Scheduling**: Within the same priority level, jobs are processed in FIFO order
+- **Worker Affinity**: Workers can be configured to handle specific priority levels
+
+## Architecture
+
+```
+Application
+    ↓ (enqueue jobs)
+Priority Job Queue
+    ├── High Priority Queue [Job, Job, Job]
+    ├── Normal Priority Queue [Job, Job, Job]
+    └── Low Priority Queue [Job, Job, Job]
+    ↓ (dequeue by priority)
+Thread Pool Workers
+    ├── Worker 0 (can handle: High, Normal, Low)
+    ├── Worker 1 (can handle: High, Normal, Low)
+    ├── Worker 2 (can handle: High, Normal, Low)
+    ├── Worker 3 (can handle: High, Normal, Low)
+    ├── Worker 4 (can handle: High, Normal, Low)
+    └── Worker 5 (can handle: High, Normal, Low)
+```
+
+## Use Cases
+
+- **Task Scheduling**: Execute tasks in order of importance
+- **Resource Management**: Prioritize critical operations over background tasks
+- **Load Balancing**: Distribute work across multiple threads
+- **Async Operations**: Offload work from main thread to background threads
+
+## Performance Characteristics
+
+- **Lock-Free Queue**: High throughput with minimal contention
+- **Scalable**: Efficient with many workers and many jobs
+- **Low Latency**: High priority jobs start quickly
+- **Fair**: Jobs at the same priority level are processed fairly
+
+## Related Samples
+
+- [Logging Sample](../logging_sample/README.md) - Uses thread pool for async logging
+- [Container Sample](../container_sample/README.md) - Data structures used in job payloads
+- [Echo Server](../echo_server/README.md) - Uses thread pool for handling connections
