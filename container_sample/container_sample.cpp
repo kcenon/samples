@@ -30,8 +30,6 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *****************************************************************************/
 
-#include "utilities/parsing/argument_parser.h"
-
 #include "fmt/format.h"
 #include "fmt/xchar.h"
 
@@ -42,8 +40,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <chrono>
 
 constexpr auto PROGRAM_NAME = L"container_sample";
-
-using namespace utility_module;
 
 // Define a simple utility class for time measurement
 class Timer {
@@ -73,9 +69,6 @@ LogStyle log_style = LogStyle::ConsoleOnly;
 LogLevel log_level = LogLevel::Information;
 LogStyle log_style = LogStyle::FileOnly;
 #endif
-
-bool parse_arguments(argument_manager& arguments);
-void display_help(void);
 
 // Simple logger implementation
 class SimpleLogger {
@@ -184,22 +177,9 @@ int main(int argc, char* argv[])
     // Set default values first
     log_level = LogLevel::Information;
     log_style = LogStyle::ConsoleOnly;
-    
-    if (argc > 1) {
-        argument_manager arguments;
-        auto result = arguments.try_parse(argc, argv);
-        if (result.has_value()) {
-            std::wcout << L"Argument parsing failed: " << std::wstring(result.value().begin(), result.value().end()) << std::endl;
-            return 0;
-        }
-        
-        if (!parse_arguments(arguments)) {
-            std::wcout << L"Argument parsing returned early (likely help was displayed)" << std::endl;
-            return 0;
-        }
-    } else {
-        std::wcout << L"No arguments provided, using defaults" << std::endl;
-    }
+
+    // Using default configuration
+    std::wcout << L"Using default configuration (log_level=Information, style=ConsoleOnly)" << std::endl;
 
     std::wcout << L"Starting logger..." << std::endl;
     SimpleLogger logger;
@@ -260,55 +240,5 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-bool parse_arguments(argument_manager& arguments)
-{
-    std::wstring temp;
-
-    auto string_target = arguments.to_string("--help");
-    if (string_target.has_value())
-    {
-        display_help();
-        return false;
-    }
-
-    auto int_target = arguments.to_int("--logging_level");
-    if (int_target.has_value())
-    {
-        int level = int_target.value();
-        if (level >= 0 && level <= 4) {
-            log_level = static_cast<LogLevel>(level);
-        }
-    }
-
-    auto bool_target = arguments.to_bool("--write_console_only");
-    if (bool_target.has_value() && bool_target.value())
-    {
-        log_style = LogStyle::ConsoleOnly;
-        return true;
-    }
-
-    bool_target = arguments.to_bool("--write_console");
-    if (bool_target.has_value() && bool_target.value())
-    {
-        log_style = LogStyle::FileAndConsole;
-        return true;
-    }
-
-    log_style = LogStyle::FileOnly;
-    return true;
-}
-
-void display_help(void)
-{
-    std::wcout << L"Container sample options:" << std::endl << std::endl;
-    std::wcout << L"--write_console [value] " << std::endl;
-    std::wcout << L"\tThe write_console_mode on/off. If you want to display log on "
-            L"console must be appended '--write_console true'.\n\tInitialize "
-            L"value is --write_console off."
-        << std::endl
-        << std::endl;
-    std::wcout << L"--logging_level [value]" << std::endl;
-    std::wcout << L"\tIf you want to change log level must be appended "
-            L"'--logging_level [level]'."
-        << std::endl;
-}
+// Argument parsing functions removed for simplicity
+// This is a simplified sample that uses default configuration

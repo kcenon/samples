@@ -1,16 +1,29 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 3.14)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.16)
 
 SET(PROGRAM_NAME container_sample)
-SET(CMAKE_CXX_STANDARD 20)
-SET(CMAKE_CXX_STANDARD_REQUIRED TRUE)
-
 PROJECT(${PROGRAM_NAME})
 
+# C++20 standard
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Create executable
 ADD_EXECUTABLE(${PROGRAM_NAME} container_sample.cpp)
 
-TARGET_INCLUDE_DIRECTORIES(${PROGRAM_NAME} PUBLIC ../messaging_system/thread_system/sources/utilities)
-TARGET_INCLUDE_DIRECTORIES(${PROGRAM_NAME} PUBLIC ../messaging_system/thread_system/sources/utilities/parsing)
-TARGET_INCLUDE_DIRECTORIES(${PROGRAM_NAME} PUBLIC ../messaging_system/container)
+# Link against system libraries
+# This sample demonstrates container_system integration
+# Note: These targets are provided by messaging_system's transitive dependencies
+TARGET_LINK_LIBRARIES(${PROGRAM_NAME} PRIVATE
+    container_system
+    LoggerSystem
+    utilities
+    fmt::fmt
+    Threads::Threads
+)
 
-ADD_DEPENDENCIES(${PROGRAM_NAME} utilities container)
-TARGET_LINK_LIBRARIES(${PROGRAM_NAME} PUBLIC utilities container fmt::fmt)
+# Set output directory
+set_target_properties(${PROGRAM_NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+message(STATUS "Configured ${PROGRAM_NAME}")
