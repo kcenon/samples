@@ -55,6 +55,9 @@ This samples repository demonstrates practical usage of the modular C++ ecosyste
 | **[udp_echo_server](#6-udp_echo_server)** | network_system (UDP) | ~165 | ⭐⭐ Medium | UDP server implementation |
 | **[udp_echo_client](#7-udp_echo_client)** | network_system (UDP) | ~190 | ⭐⭐ Medium | UDP client implementation |
 | **[combined_sample](#8-combined_sample)** | Multi-system | ~145 | ⭐⭐⭐ Advanced | Logger + Container + Threads integration |
+| **[monitoring_sample](#9-monitoring_sample)** | Standalone | ~385 | ⭐⭐ Medium | Performance profiling & resource monitoring |
+| **[database_sample](#10-database_sample)** | SQLite | ~300 | ⭐⭐ Medium | Database CRUD operations |
+| **[monitoring_integration_sample](#11-monitoring_integration_sample)** | Multi-system | ~380 | ⭐⭐⭐ Advanced | Complete observability stack |
 
 ---
 
@@ -113,6 +116,15 @@ cd samples
 
 # Combined integration sample - Multi-system usage
 ./bin/combined_sample
+
+# Performance monitoring - System resource tracking
+./bin/monitoring_sample
+
+# Database operations - SQLite CRUD
+./bin/database_sample
+
+# Observability stack - Logger + Threads + Monitoring
+./bin/monitoring_integration_sample
 ```
 
 > 💡 **Next Steps**: Explore [Detailed Examples](#-detailed-examples) below or check individual sample READMEs
@@ -405,6 +417,196 @@ int main() {
 ```
 
 **Learn More:** [combined_sample/README.md](combined_sample/)
+
+---
+
+### 9. **monitoring_sample**
+**Purpose:** Performance profiling and system resource monitoring
+
+**Key Features:**
+- ✅ High-precision performance profiling with scoped timers
+- ✅ System resource monitoring (CPU/Memory - macOS/Linux)
+- ✅ Performance metrics collection (min/mean/median/max/throughput)
+- ✅ Real-time monitoring dashboard
+- ✅ Standalone implementation (no external dependencies)
+
+**Quick Usage:**
+```cpp
+#include <chrono>
+#include <vector>
+#include <algorithm>
+
+// Simple performance profiler
+class performance_profiler {
+public:
+    void record_sample(const std::string& operation_name,
+                      std::chrono::nanoseconds duration,
+                      bool success = true);
+
+    performance_summary get_summary(const std::string& operation_name) const;
+};
+
+// Scoped timer for automatic measurement
+class scoped_timer {
+public:
+    scoped_timer(performance_profiler& profiler, const std::string& op)
+        : profiler_(profiler), operation_name_(op),
+          start_time_(std::chrono::high_resolution_clock::now()) {}
+
+    ~scoped_timer() {
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            end_time - start_time_);
+        profiler_.record_sample(operation_name_, duration);
+    }
+
+private:
+    performance_profiler& profiler_;
+    std::string operation_name_;
+    std::chrono::high_resolution_clock::time_point start_time_;
+};
+
+int main() {
+    performance_profiler profiler;
+
+    // Profile CPU work
+    {
+        scoped_timer timer(profiler, "cpu_work");
+        // ... perform work ...
+    }
+
+    // Get metrics
+    auto summary = profiler.get_summary("cpu_work");
+    std::cout << "Throughput: " << summary.throughput << " ops/sec\n";
+
+    return 0;
+}
+```
+
+---
+
+### 10. **database_sample**
+**Purpose:** Demonstrates basic database operations with SQLite
+
+**Key Features:**
+- ✅ SQLite integration with in-memory database
+- ✅ Complete CRUD operations (Create, Read, Update, Delete)
+- ✅ Table creation and schema management
+- ✅ Aggregate queries (COUNT, AVG)
+- ✅ Transaction support
+- ✅ Error handling and result processing
+
+**Quick Usage:**
+```cpp
+#include <sqlite3.h>
+#include <string>
+#include <vector>
+#include <map>
+
+// Simple SQLite wrapper
+class simple_sqlite_db {
+public:
+    bool connect(const std::string& db_path);
+    bool execute(const std::string& sql);
+    database_result query(const std::string& sql);
+    int get_changes();
+private:
+    sqlite3* db_;
+};
+
+int main() {
+    simple_sqlite_db db;
+    db.connect(":memory:");
+
+    // Create table
+    db.execute(R"(
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            username TEXT NOT NULL,
+            email TEXT,
+            age INTEGER
+        )
+    )");
+
+    // Insert records
+    db.execute("INSERT INTO users (username, email, age) "
+               "VALUES ('alice', 'alice@example.com', 28)");
+
+    // Query records
+    auto results = db.query("SELECT * FROM users");
+    for (const auto& row : results) {
+        std::cout << "User: " << row["username"] << "\n";
+    }
+
+    // Update records
+    db.execute("UPDATE users SET age = 29 WHERE username = 'alice'");
+
+    // Delete records
+    db.execute("DELETE FROM users WHERE username = 'alice'");
+
+    return 0;
+}
+```
+
+---
+
+### 11. **monitoring_integration_sample**
+**Purpose:** Complete observability stack (Logger + Threads + Performance Monitoring)
+
+**Key Features:**
+- ✅ Full integration of Logger, Thread Pool, and Performance Profiler
+- ✅ Production-ready observability patterns
+- ✅ Real-time job tracking and metrics collection
+- ✅ Distributed tracing concepts
+- ✅ Comprehensive monitoring dashboard
+- ✅ Error tracking and success rate calculation
+
+**Quick Usage:**
+```cpp
+#include "kcenon/logger/core/logger.h"
+#include "kcenon/thread/core/thread_pool.h"
+
+int main() {
+    // Initialize observability stack
+    auto log = std::make_shared<logger>(true, 8192);
+    log->start();
+
+    auto pool = std::make_shared<thread_pool>("worker-pool");
+    pool->start();
+
+    performance_profiler profiler;
+    job_statistics stats;
+
+    // Submit monitored jobs
+    for (int i = 1; i <= 20; ++i) {
+        auto job = std::make_unique<callback_job>(
+            [log, &profiler, &stats, i]() -> std::optional<std::string> {
+                scoped_timer timer(profiler, "data_processing");
+
+                log->log(log_level::info,
+                        fmt::format("[Job #{}] Processing", i));
+
+                // Simulate work
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+                stats.completed_jobs++;
+                return std::nullopt;
+            },
+            fmt::format("job-{}", i)
+        );
+        pool->enqueue(std::move(job));
+    }
+
+    // Display dashboard
+    auto summaries = profiler.get_all_summaries();
+    display_dashboard(summaries, stats);
+
+    pool->stop();
+    log->stop();
+
+    return 0;
+}
+```
 
 ---
 
