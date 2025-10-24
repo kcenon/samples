@@ -1,6 +1,6 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.16)
 
-SET(PROGRAM_NAME monitoring_integration_sample)
+SET(PROGRAM_NAME database_integration_sample)
 PROJECT(${PROGRAM_NAME})
 
 set(CMAKE_CXX_STANDARD 20)
@@ -9,21 +9,22 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Source files
 ADD_EXECUTABLE(${PROGRAM_NAME}
-    monitoring_integration_sample.cpp
+    database_integration_sample.cpp
 )
 
-# Add include directories for monitoring_system and common_system
+# Add include directories
+# database_system's header files are in ../database_system/database/
 target_include_directories(${PROGRAM_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../monitoring_system/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../common_system/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../database_system/database
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../database_system
 )
 
 # Link with required libraries
-# MonitoringSystem provides monitoring functionality
+# database provides database functionality (not database_system)
 # LoggerSystem provides logging (via messaging_system dependency chain)
 # thread_base, interfaces, utilities provide thread_system components
 TARGET_LINK_LIBRARIES(${PROGRAM_NAME} PRIVATE
-    monitoring_system    # Monitoring functionality
+    database             # Database operations (from database_system/database)
     LoggerSystem         # Logging functionality
     thread_base          # Thread pool and job system
     interfaces           # Thread system interfaces

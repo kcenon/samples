@@ -55,9 +55,9 @@ This samples repository demonstrates practical usage of the modular C++ ecosyste
 | **[udp_echo_server](#6-udp_echo_server)** | network_system (UDP) | ~165 | ⭐⭐ Medium | UDP server implementation |
 | **[udp_echo_client](#7-udp_echo_client)** | network_system (UDP) | ~190 | ⭐⭐ Medium | UDP client implementation |
 | **[combined_sample](#8-combined_sample)** | Multi-system | ~145 | ⭐⭐⭐ Advanced | Logger + Container + Threads integration |
-| **[monitoring_sample](#9-monitoring_sample)** | Standalone | ~385 | ⭐⭐ Medium | Performance profiling & resource monitoring |
-| **[database_sample](#10-database_sample)** | SQLite | ~300 | ⭐⭐ Medium | Database CRUD operations |
-| **[monitoring_integration_sample](#11-monitoring_integration_sample)** | Multi-system | ~380 | ⭐⭐⭐ Advanced | Complete observability stack |
+| **[database_integration_sample](#9-database_integration_sample)** | database + thread + logger | ~350 | ⭐⭐⭐ Advanced | Async database operations with thread pool |
+| **[thread_integration_sample](#10-thread_integration_sample)** | thread + logger | ~450 | ⭐⭐⭐ Advanced | Priority-based scheduling and performance tracking |
+| **[monitoring_integration_sample](#11-monitoring_integration_sample)** | monitoring + thread + logger | ~400 | ⭐⭐⭐ Advanced | Real-time system monitoring and performance profiling |
 
 ---
 
@@ -117,13 +117,13 @@ cd samples
 # Combined integration sample - Multi-system usage
 ./bin/combined_sample
 
-# Performance monitoring - System resource tracking
-./bin/monitoring_sample
+# Database integration sample - Async database operations
+./bin/database_integration_sample
 
-# Database operations - SQLite CRUD
-./bin/database_sample
+# Thread integration sample - Priority scheduling and performance tracking
+./bin/thread_integration_sample
 
-# Observability stack - Logger + Threads + Monitoring
+# Monitoring integration sample - Real-time system monitoring
 ./bin/monitoring_integration_sample
 ```
 
@@ -420,176 +420,337 @@ int main() {
 
 ---
 
-### 9. **monitoring_sample**
-**Purpose:** Performance profiling and system resource monitoring
+### 9. **database_integration_sample**
+**Purpose:** Demonstrates asynchronous database operations using database_system, thread_system, and logger_system
 
 **Key Features:**
-- ✅ High-precision performance profiling with scoped timers
-- ✅ System resource monitoring (CPU/Memory - macOS/Linux)
-- ✅ Performance metrics collection (min/mean/median/max/throughput)
-- ✅ Real-time monitoring dashboard
-- ✅ Standalone implementation (no external dependencies)
+- ✅ SQLite database operations (in-memory and file-based)
+- ✅ Async query execution with thread pool
+- ✅ Query builder pattern for type-safe SQL
+- ✅ Connection pooling and transaction management
+- ✅ Real-time performance monitoring and statistics
+- ✅ Comprehensive error handling and logging
 
 **Quick Usage:**
 ```cpp
-#include <chrono>
-#include <vector>
-#include <algorithm>
-
-// Simple performance profiler
-class performance_profiler {
-public:
-    void record_sample(const std::string& operation_name,
-                      std::chrono::nanoseconds duration,
-                      bool success = true);
-
-    performance_summary get_summary(const std::string& operation_name) const;
-};
-
-// Scoped timer for automatic measurement
-class scoped_timer {
-public:
-    scoped_timer(performance_profiler& profiler, const std::string& op)
-        : profiler_(profiler), operation_name_(op),
-          start_time_(std::chrono::high_resolution_clock::now()) {}
-
-    ~scoped_timer() {
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            end_time - start_time_);
-        profiler_.record_sample(operation_name_, duration);
-    }
-
-private:
-    performance_profiler& profiler_;
-    std::string operation_name_;
-    std::chrono::high_resolution_clock::time_point start_time_;
-};
+#include "database/database_manager.h"
+#include "database/query_builder.h"
+#include "kcenon/logger/core/logger.h"
+#include "kcenon/thread/core/thread_pool.h"
 
 int main() {
-    performance_profiler profiler;
+    // Initialize logger
+    auto log = std::make_shared<logger>(true, 8192);
+    log->add_writer(std::make_unique<console_writer>());
+    log->start();
 
-    // Profile CPU work
-    {
-        scoped_timer timer(profiler, "cpu_work");
-        // ... perform work ...
-    }
-
-    // Get metrics
-    auto summary = profiler.get_summary("cpu_work");
-    std::cout << "Throughput: " << summary.throughput << " ops/sec\n";
-
-    return 0;
-}
-```
-
----
-
-### 10. **database_sample**
-**Purpose:** Demonstrates basic database operations with SQLite
-
-**Key Features:**
-- ✅ SQLite integration with in-memory database
-- ✅ Complete CRUD operations (Create, Read, Update, Delete)
-- ✅ Table creation and schema management
-- ✅ Aggregate queries (COUNT, AVG)
-- ✅ Transaction support
-- ✅ Error handling and result processing
-
-**Quick Usage:**
-```cpp
-#include <sqlite3.h>
-#include <string>
-#include <vector>
-#include <map>
-
-// Simple SQLite wrapper
-class simple_sqlite_db {
-public:
-    bool connect(const std::string& db_path);
-    bool execute(const std::string& sql);
-    database_result query(const std::string& sql);
-    int get_changes();
-private:
-    sqlite3* db_;
-};
-
-int main() {
-    simple_sqlite_db db;
-    db.connect(":memory:");
+    // Initialize database
+    database::database_manager db_manager;
+    db_manager.set_mode(database::database_types::sqlite);
+    db_manager.connect(":memory:");
 
     // Create table
-    db.execute(R"(
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY,
-            username TEXT NOT NULL,
-            email TEXT,
-            age INTEGER
-        )
-    )");
+    auto builder = db_manager.create_query_builder();
+    // ... execute CREATE TABLE query
 
-    // Insert records
-    db.execute("INSERT INTO users (username, email, age) "
-               "VALUES ('alice', 'alice@example.com', 28)");
+    // Initialize thread pool
+    auto pool = std::make_shared<thread_pool>("db-worker-pool");
+    pool->start();
 
-    // Query records
-    auto results = db.query("SELECT * FROM users");
-    for (const auto& row : results) {
-        std::cout << "User: " << row["username"] << "\n";
-    }
+    // Submit async INSERT job
+    pool->enqueue(std::make_unique<callback_job>(
+        [&]() -> std::optional<std::string> {
+            auto builder = db_manager.create_query_builder();
+            // ... execute INSERT query
+            log->log(log_level::info, "INSERT completed");
+            return std::nullopt;
+        },
+        "insert-job-1"
+    ));
 
-    // Update records
-    db.execute("UPDATE users SET age = 29 WHERE username = 'alice'");
+    // Submit async SELECT job
+    pool->enqueue(std::make_unique<callback_job>(
+        [&]() -> std::optional<std::string> {
+            auto builder = db_manager.create_query_builder();
+            // ... execute SELECT query
+            log->log(log_level::info, "SELECT completed");
+            return std::nullopt;
+        },
+        "select-job-1"
+    ));
 
-    // Delete records
-    db.execute("DELETE FROM users WHERE username = 'alice'");
+    // Cleanup
+    pool->stop();
+    db_manager.disconnect();
+    log->stop();
 
     return 0;
 }
 ```
 
+**Sample Output:**
+```
+═══════════════════════════════════════════════════════
+  Phase 1: Component Initialization
+═══════════════════════════════════════════════════════
+
+[Logger] Logger system initialized
+[Database] Connected to SQLite (:memory:)
+[Database] Created 'users' table
+[Thread Pool] Thread pool started
+
+[System] All components initialized successfully
+
+═══════════════════════════════════════════════════════
+  Phase 2: Asynchronous Database Operations
+═══════════════════════════════════════════════════════
+
+[Phase 2] Submitting 10 INSERT and 10 SELECT operations
+[Job #1] Executing INSERT query
+[Job #1] INSERT completed (2ms)
+[Job #2] Executing SELECT query
+[Job #2] SELECT completed (1ms)
+...
+
+═══════════════════════════════════════════════════════
+  Phase 4: Final Dashboard
+═══════════════════════════════════════════════════════
+
+╔═════════════════════════════════════════════════════════╗
+║       Database Integration Dashboard                   ║
+╚═════════════════════════════════════════════════════════╝
+
+📊 Query Statistics:
+   Total Queries:    20
+   Successful:       20
+   Failed:           0
+   Success Rate:     100.0%
+
+⏱️  Performance:
+   Avg INSERT Time:  2 ms
+   Avg SELECT Time:  1 ms
+
+═══════════════════════════════════════════════════════════
+
+✓ database_system:        SUCCESS (SQLite)
+✓ thread_system:          SUCCESS (20 async operations)
+✓ logger_system:          SUCCESS
+✓ Success Rate:           100.0%
+```
+
+**Learn More:** [database_integration_sample/README.md](database_integration_sample/)
+
 ---
 
-### 11. **monitoring_integration_sample**
-**Purpose:** Complete observability stack (Logger + Threads + Performance Monitoring)
+### 10. **thread_integration_sample**
+**Purpose:** Demonstrates advanced thread_system features with priority-based scheduling and performance tracking
 
 **Key Features:**
-- ✅ Full integration of Logger, Thread Pool, and Performance Profiler
-- ✅ Production-ready observability patterns
-- ✅ Real-time job tracking and metrics collection
-- ✅ Distributed tracing concepts
-- ✅ Comprehensive monitoring dashboard
-- ✅ Error tracking and success rate calculation
+- ✅ Basic thread_pool for simple async operations
+- ✅ Priority-based job scheduling (High/Normal/Low)
+- ✅ Real-time performance monitoring and statistics
+- ✅ Comprehensive logging with logger_system
+- ✅ Different workload types (compute-intensive, I/O-bound)
+- ✅ Min/Max/Average execution time tracking
 
 **Quick Usage:**
 ```cpp
 #include "kcenon/logger/core/logger.h"
 #include "kcenon/thread/core/thread_pool.h"
+#include "kcenon/thread/core/callback_job.h"
 
 int main() {
-    // Initialize observability stack
+    // Initialize logger
     auto log = std::make_shared<logger>(true, 8192);
+    log->add_writer(std::make_unique<console_writer>());
     log->start();
 
+    // Create basic thread pool
     auto pool = std::make_shared<thread_pool>("worker-pool");
     pool->start();
 
-    performance_profiler profiler;
-    job_statistics stats;
-
-    // Submit monitored jobs
-    for (int i = 1; i <= 20; ++i) {
+    // Submit jobs with different priorities
+    // High priority - compute-intensive
+    for (int i = 0; i < 3; ++i) {
         auto job = std::make_unique<callback_job>(
-            [log, &profiler, &stats, i]() -> std::optional<std::string> {
-                scoped_timer timer(profiler, "data_processing");
+            [log, i]() -> std::optional<std::string> {
+                log->log(log_level::info,
+                        fmt::format("[High Priority] Job {} executing", i));
+                // Perform compute-intensive work
+                return std::nullopt;
+            },
+            fmt::format("high-priority-{}", i)
+        );
+        pool->enqueue(std::move(job));
+    }
+
+    // Normal priority - balanced workload
+    for (int i = 0; i < 3; ++i) {
+        auto job = std::make_unique<callback_job>(
+            [log, i]() -> std::optional<std::string> {
+                log->log(log_level::info,
+                        fmt::format("[Normal Priority] Job {} executing", i));
+                return std::nullopt;
+            },
+            fmt::format("normal-priority-{}", i)
+        );
+        pool->enqueue(std::move(job));
+    }
+
+    // Low priority - I/O-bound
+    for (int i = 0; i < 3; ++i) {
+        auto job = std::make_unique<callback_job>(
+            [log, i]() -> std::optional<std::string> {
+                log->log(log_level::info,
+                        fmt::format("[Low Priority] Job {} executing", i));
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                return std::nullopt;
+            },
+            fmt::format("low-priority-{}", i)
+        );
+        pool->enqueue(std::move(job));
+    }
+
+    // Wait for completion
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    // Cleanup
+    pool->stop();
+    log->stop();
+
+    return 0;
+}
+```
+
+**Sample Output:**
+```
+═══════════════════════════════════════════════════════
+  Phase 1: Component Initialization
+═══════════════════════════════════════════════════════
+
+[Logger] Logger system initialized
+
+[System] All components initialized successfully
+
+═══════════════════════════════════════════════════════
+  Phase 2: Basic Thread Pool Operations
+═══════════════════════════════════════════════════════
+
+[Thread Pool] Basic pool started
+[Phase 2] Submitting 5 basic jobs
+[Basic Job #1] Executing
+[Basic Job #1] Completed (15ms)
+[Basic Job #2] Executing
+[Basic Job #2] Completed (12ms)
+...
+
+═══════════════════════════════════════════════════════
+  Phase 3: Priority-Based Thread Pool
+═══════════════════════════════════════════════════════
+
+[Thread Pool] Priority pool started
+[Phase 3] Submitting 3 high, 3 normal, 3 low priority jobs
+[High Priority Job #1] Executing
+[High Priority Job #1] Completed (22ms)
+[Normal Priority Job #1] Executing
+[Normal Priority Job #1] Completed (18ms)
+...
+
+═══════════════════════════════════════════════════════
+  Phase 5: Final Dashboard
+═══════════════════════════════════════════════════════
+
+╔═════════════════════════════════════════════════════════╗
+║       Thread Integration Dashboard                    ║
+╚═════════════════════════════════════════════════════════╝
+
+📊 Job Statistics:
+   Total Jobs:       14
+   Completed:        14
+   Failed:           0
+   Success Rate:     100.0%
+
+🎯 Priority Distribution:
+   High Priority:    3
+   Normal Priority:  3
+   Low Priority:     3
+
+⏱️  Performance:
+   Avg Execution:    16.43 ms
+   Min Execution:    12 ms
+   Max Execution:    54 ms
+
+═══════════════════════════════════════════════════════════
+
+✓ thread_system:          SUCCESS (14 jobs processed)
+✓ logger_system:          SUCCESS
+✓ Priority Scheduling:    DEMONSTRATED
+✓ Success Rate:           100.0%
+```
+
+**Learn More:** [thread_integration_sample/README.md](thread_integration_sample/)
+
+---
+
+### 11. **monitoring_integration_sample**
+**Purpose:** Demonstrates real-time system monitoring and performance profiling with monitoring_system, thread_system, and logger_system integration
+
+**Key Features:**
+- ✅ System resource monitoring (CPU, memory, threads)
+- ✅ Performance profiling with percentile metrics (P50/P95/P99)
+- ✅ Real-time resource snapshots during execution
+- ✅ Operation throughput tracking
+- ✅ Integration with logger_system for event logging
+- ✅ Comprehensive dashboard display
+
+**Quick Usage:**
+```cpp
+#include "kcenon/logger/core/logger.h"
+#include "kcenon/thread/core/thread_pool.h"
+#include "kcenon/monitoring/core/performance_monitor.h"
+#include "kcenon/monitoring/collectors/system_resource_collector.h"
+
+int main() {
+    // Initialize components
+    auto log = std::make_shared<logger>(true, 8192);
+    log->add_writer(std::make_unique<console_writer>());
+    log->start();
+
+    performance_profiler profiler;
+    system_info_collector resource_collector;
+
+    auto pool = std::make_shared<thread_pool>("monitored-pool");
+    pool->start();
+
+    // Collect baseline system resources
+    auto baseline = resource_collector.collect();
+    log->log(log_level::info,
+            fmt::format("CPU: {:.1f}%, Memory: {} MB",
+                       baseline.cpu_usage_percent,
+                       baseline.used_memory_bytes / (1024 * 1024)));
+
+    // Execute monitored jobs
+    for (int i = 0; i < 10; ++i) {
+        auto job = std::make_unique<callback_job>(
+            [&profiler, log, i]() -> std::optional<std::string> {
+                auto start = std::chrono::high_resolution_clock::now();
+
+                // Perform work
+                volatile uint64_t result = 0;
+                for (int j = 0; j < 100000; ++j) {
+                    result += j * j;
+                }
+
+                auto end = std::chrono::high_resolution_clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    end - start);
+
+                // Record performance sample
+                profiler.record_sample("compute_job", duration);
 
                 log->log(log_level::info,
-                        fmt::format("[Job #{}] Processing", i));
+                        fmt::format("Job {} completed", i));
 
-                // Simulate work
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-                stats.completed_jobs++;
                 return std::nullopt;
             },
             fmt::format("job-{}", i)
@@ -597,16 +758,103 @@ int main() {
         pool->enqueue(std::move(job));
     }
 
-    // Display dashboard
-    auto summaries = profiler.get_all_summaries();
-    display_dashboard(summaries, stats);
+    // Wait for completion
+    std::this_thread::sleep_for(std::chrono::seconds(2));
 
+    // Get performance metrics
+    auto metrics = profiler.get_metrics();
+    for (const auto& [name, metric] : metrics) {
+        log->log(log_level::info,
+                fmt::format("Operation: {}, Calls: {}, "
+                           "Mean: {:.2f}ms, P95: {:.2f}ms",
+                           name, metric.call_count,
+                           metric.mean_duration.count() / 1e6,
+                           metric.p95_duration.count() / 1e6));
+    }
+
+    // Collect final system resources
+    auto final = resource_collector.collect();
+    log->log(log_level::info,
+            fmt::format("Final - CPU: {:.1f}%, Memory: {} MB",
+                       final.cpu_usage_percent,
+                       final.used_memory_bytes / (1024 * 1024)));
+
+    // Cleanup
     pool->stop();
     log->stop();
 
     return 0;
 }
 ```
+
+**Sample Output:**
+```
+═══════════════════════════════════════════════════════
+  Phase 2: Baseline System Resources
+═══════════════════════════════════════════════════════
+
+╔═════════════════════════════════════════════════════════╗
+║       System Resources Dashboard                      ║
+╚═════════════════════════════════════════════════════════╝
+
+💻 CPU Metrics:
+   CPU Usage:        12.5%
+   CPU Count:        8
+   Load Avg (1min):  2.34
+
+💾 Memory Metrics:
+   Total Memory:     16384 MB
+   Used Memory:      8192 MB
+   Available Memory: 8192 MB
+   Memory Usage:     50.0%
+
+🧵 Process Metrics:
+   Thread Count:     24
+   Process Count:    156
+
+═══════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════
+  Phase 3: Execute Monitored Jobs
+═══════════════════════════════════════════════════════
+
+[Phase 3] Submitting 15 monitored jobs
+
+[Job #1] Starting (complexity: 5)
+[Job #1] Completed
+[Job #2] Starting (complexity: 10)
+[Job #2] Completed
+...
+
+═══════════════════════════════════════════════════════
+  Phase 6: Performance Metrics
+═══════════════════════════════════════════════════════
+
+╔═════════════════════════════════════════════════════════╗
+║       Performance Metrics Dashboard                   ║
+╚═════════════════════════════════════════════════════════╝
+
+📊 Operation: compute_job_0
+   Call Count:       5
+   Error Count:      0
+   Min Duration:     12.34 ms
+   Max Duration:     18.92 ms
+   Mean Duration:    15.23 ms
+   Median Duration:  14.87 ms
+   P95 Duration:     18.45 ms
+   P99 Duration:     18.89 ms
+   Throughput:       65.50 ops/sec
+
+═══════════════════════════════════════════════════════════
+
+✓ monitoring_system:      SUCCESS (15 operations profiled)
+✓ thread_system:          SUCCESS (15 jobs processed)
+✓ logger_system:          SUCCESS
+✓ Resource Snapshots:     5 collected
+✓ Success Rate:           100.0%
+```
+
+**Learn More:** [monitoring_integration_sample/README.md](monitoring_integration_sample/)
 
 ---
 
