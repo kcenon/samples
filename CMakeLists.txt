@@ -199,6 +199,8 @@ if(SAMPLES_BUILD_EXAMPLES)
     ADD_SUBDIRECTORY(threads_sample)
     ADD_SUBDIRECTORY(echo_client)
     ADD_SUBDIRECTORY(echo_server)
+    ADD_SUBDIRECTORY(udp_echo_client)
+    ADD_SUBDIRECTORY(udp_echo_server)
     ADD_SUBDIRECTORY(combined_sample)
 
     message(STATUS "Sample programs configured")
