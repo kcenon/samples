@@ -50,9 +50,11 @@ This samples repository demonstrates practical usage of the modular C++ ecosyste
 | **[logging_sample](#1-logging_sample)** | logger_system | ~100 | ⭐ Easy | Async logging basics |
 | **[container_sample](#2-container_sample)** | container_system | ~150 | ⭐⭐ Medium | Type-safe data containers |
 | **[threads_sample](#3-threads_sample)** | thread_system | ~200 | ⭐⭐⭐ Advanced | Priority thread pools |
-| **[echo_server](#4-echo_server)** | network_system | ~180 | ⭐⭐ Medium | TCP server implementation |
-| **[echo_client](#5-echo_client)** | network_system | ~150 | ⭐⭐ Medium | TCP client implementation |
-| **[combined_sample](#6-combined_sample)** | Multi-system | ~145 | ⭐⭐⭐ Advanced | Logger + Container + Threads integration |
+| **[echo_server](#4-echo_server)** | network_system (TCP) | ~180 | ⭐⭐ Medium | TCP server implementation |
+| **[echo_client](#5-echo_client)** | network_system (TCP) | ~150 | ⭐⭐ Medium | TCP client implementation |
+| **[udp_echo_server](#6-udp_echo_server)** | network_system (UDP) | ~165 | ⭐⭐ Medium | UDP server implementation |
+| **[udp_echo_client](#7-udp_echo_client)** | network_system (UDP) | ~190 | ⭐⭐ Medium | UDP client implementation |
+| **[combined_sample](#8-combined_sample)** | Multi-system | ~145 | ⭐⭐⭐ Advanced | Logger + Container + Threads integration |
 
 ---
 
@@ -101,9 +103,13 @@ cd samples
 # Thread pool sample - Concurrent processing
 ./bin/threads_sample
 
-# Network samples - Client/Server communication
-./bin/echo_server &    # Start server in background
-./bin/echo_client      # Run client
+# Network samples - TCP Client/Server communication
+./bin/echo_server &    # Start TCP server in background
+./bin/echo_client      # Run TCP client
+
+# Network samples - UDP Client/Server communication
+./bin/udp_echo_server &  # Start UDP server in background
+./bin/udp_echo_client    # Run UDP client
 
 # Combined integration sample - Multi-system usage
 ./bin/combined_sample
@@ -256,7 +262,103 @@ int main() {
 
 ---
 
-### 6. **combined_sample**
+### 6. **udp_echo_server**
+**Purpose:** Demonstrates UDP server implementation with datagram handling
+
+**Key Features:**
+- ✅ Connectionless UDP communication
+- ✅ Endpoint-based routing
+- ✅ Asynchronous datagram processing
+- ✅ Multiple client support (stateless)
+
+**Quick Usage:**
+```cpp
+#include "network_system/core/messaging_udp_server.h"
+
+int main() {
+    using namespace network_system::core;
+
+    auto server = std::make_shared<messaging_udp_server>("UDPEchoServer");
+
+    // Set up receive callback
+    server->set_receive_callback(
+        [server](const std::vector<uint8_t>& data,
+                const asio::ip::udp::endpoint& sender)
+        {
+            std::string msg(data.begin(), data.end());
+            std::cout << "Received: " << msg << "\n";
+
+            // Echo back
+            std::string echo = "Echo: " + msg;
+            std::vector<uint8_t> response(echo.begin(), echo.end());
+
+            server->async_send_to(std::move(response), sender,
+                [](std::error_code ec, std::size_t bytes) {
+                    if (!ec) std::cout << "Sent " << bytes << " bytes\n";
+                });
+        });
+
+    server->start_server(5555);
+    server->wait_for_stop();
+
+    return 0;
+}
+```
+
+**Learn More:** [udp_echo_server/README.md](udp_echo_server/)
+
+---
+
+### 7. **udp_echo_client**
+**Purpose:** Demonstrates UDP client implementation with datagram transmission
+
+**Key Features:**
+- ✅ Connectionless UDP communication
+- ✅ Automatic endpoint resolution
+- ✅ Asynchronous send/receive
+- ✅ Statistics tracking
+
+**Quick Usage:**
+```cpp
+#include "network_system/core/messaging_udp_client.h"
+
+int main() {
+    using namespace network_system::core;
+
+    auto client = std::make_shared<messaging_udp_client>("UDPEchoClient");
+
+    // Set up receive callback
+    client->set_receive_callback(
+        [](const std::vector<uint8_t>& data,
+          const asio::ip::udp::endpoint& sender)
+        {
+            std::string msg(data.begin(), data.end());
+            std::cout << "Received: " << msg << "\n";
+        });
+
+    client->start_client("localhost", 5555);
+
+    // Send datagram
+    std::string msg = "Hello, UDP!";
+    std::vector<uint8_t> data(msg.begin(), msg.end());
+
+    client->send_packet(std::move(data),
+        [](std::error_code ec, std::size_t bytes) {
+            if (!ec) std::cout << "Sent " << bytes << " bytes\n";
+        });
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    client->stop_client();
+
+    return 0;
+}
+```
+
+**Learn More:** [udp_echo_client/README.md](udp_echo_client/)
+
+---
+
+### 8. **combined_sample**
 **Purpose:** Demonstrates integration of multiple systems (Logger + Container + Threads)
 
 **Key Features:**
@@ -595,11 +697,15 @@ The build system automatically resolves dependencies in the following order:
 | **logging_sample** | ~50ms | 10,000 logs | 200K logs/sec |
 | **container_sample** | ~30ms | 10,000 operations | 333K ops/sec |
 | **threads_sample** | ~100ms | 100,000 jobs | 1M jobs/sec |
-| **echo_server** | N/A (service) | - | 10K+ connections |
-| **echo_client** | ~10ms | 1,000 messages | 100K msg/sec |
+| **echo_server** (TCP) | N/A (service) | - | 10K+ connections |
+| **echo_client** (TCP) | ~10ms | 1,000 messages | 100K msg/sec |
+| **udp_echo_server** | N/A (service) | - | 100K+ datagrams/sec |
+| **udp_echo_client** | ~3s | 5 datagrams | Lower latency than TCP |
 | **combined_sample** | ~2s | 10 async jobs | 5 jobs/sec |
 
 *Benchmarked on Apple M1 (8-core) @ 3.2GHz*
+
+**Note:** UDP typically has lower per-packet overhead and latency compared to TCP, but doesn't guarantee delivery or order.
 
 ---
 
@@ -619,6 +725,26 @@ For detailed documentation of each component, see:
 - [container_system](https://github.com/kcenon/container_system) - Data containers
 - [network_system](https://github.com/kcenon/network_system) - Network communication
 - [messaging_system](https://github.com/kcenon/messaging_system) - Complete integration
+
+---
+
+## 🔗 Related Projects
+
+### For Enterprise Solutions
+
+If you need a complete, pre-integrated threading solution with built-in observability and zero configuration:
+
+- **[integrated_thread_system](https://github.com/kcenon/integrated_thread_system)** -
+  Enterprise-grade unified threading framework combining thread_system, logger_system,
+  and monitoring_system. Provides a high-level `unified_thread_system` API with:
+  - ✅ Zero-configuration setup
+  - ✅ Built-in async logging (4.34M+ logs/sec)
+  - ✅ Real-time monitoring and health checks
+  - ✅ Lock-free thread pools (2.48M+ jobs/sec)
+
+  **Use this if:** You want a complete solution without managing individual systems.
+
+  **Use samples if:** You want to learn how each system works independently and build custom integrations.
 
 ---
 
