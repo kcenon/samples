@@ -52,6 +52,7 @@ This samples repository demonstrates practical usage of the modular C++ ecosyste
 | **[threads_sample](#3-threads_sample)** | thread_system | ~200 | ⭐⭐⭐ Advanced | Priority thread pools |
 | **[echo_server](#4-echo_server)** | network_system | ~180 | ⭐⭐ Medium | TCP server implementation |
 | **[echo_client](#5-echo_client)** | network_system | ~150 | ⭐⭐ Medium | TCP client implementation |
+| **[combined_sample](#6-combined_sample)** | Multi-system | ~145 | ⭐⭐⭐ Advanced | Logger + Container + Threads integration |
 
 ---
 
@@ -103,6 +104,9 @@ cd samples
 # Network samples - Client/Server communication
 ./bin/echo_server &    # Start server in background
 ./bin/echo_client      # Run client
+
+# Combined integration sample - Multi-system usage
+./bin/combined_sample
 ```
 
 > 💡 **Next Steps**: Explore [Detailed Examples](#-detailed-examples) below or check individual sample READMEs
@@ -252,6 +256,56 @@ int main() {
 
 ---
 
+### 6. **combined_sample**
+**Purpose:** Demonstrates integration of multiple systems (Logger + Container + Threads)
+
+**Key Features:**
+- ✅ Multi-system integration patterns
+- ✅ Async logging with thread pool
+- ✅ Type-safe data containers for results
+- ✅ Concurrent job processing
+
+**Quick Usage:**
+```cpp
+#include "kcenon/logger/core/logger.h"
+#include "kcenon/thread/core/thread_pool.h"
+#include "container/container.h"
+
+int main() {
+    // Create logger
+    auto log = std::make_shared<logger>(true, 8192);
+    log->start();
+
+    // Create thread pool
+    auto pool = std::make_shared<thread_pool>("worker-pool");
+    pool->start();
+
+    // Submit jobs with logging
+    for (int i = 0; i < 10; ++i) {
+        auto job = std::make_unique<callback_job>(
+            [i, log]() -> std::optional<std::string> {
+                log->log(log_level::info,
+                    fmt::format("Processing job {}", i));
+
+                // Create result container
+                value_container result;
+                result.add(std::make_shared<value>("job_id",
+                    value_types::int_value, std::to_string(i)));
+
+                return std::nullopt; // Success
+            }
+        );
+        pool->enqueue(std::move(job));
+    }
+
+    return 0;
+}
+```
+
+**Learn More:** [combined_sample/README.md](combined_sample/)
+
+---
+
 ## 🔥 Detailed Examples
 
 ### Example 1: Complete Logging Pipeline
@@ -346,6 +400,100 @@ int main() {
     server.start();
     return 0;
 }
+```
+
+### Example 4: Multi-System Integration (Combined Sample)
+
+Shows integration of **logger_system**, **thread_system**, and **container_system**:
+
+```cpp
+#include "fmt/format.h"
+#include "kcenon/logger/core/logger.h"
+#include "kcenon/logger/writers/console_writer.h"
+#include "kcenon/thread/core/thread_pool.h"
+#include "kcenon/thread/core/callback_job.h"
+#include "container/container.h"
+
+using kcenon::logger::logger;
+using kcenon::logger::console_writer;
+using kcenon::thread::thread_pool;
+using kcenon::thread::callback_job;
+using container_module::value_container;
+using container_module::value;
+using container_module::value_types;
+
+int main() {
+    // Create logger with async support
+    auto log = std::make_shared<logger>(true, 8192);
+    log->add_writer(std::make_unique<console_writer>());
+    log->start();
+
+    // Create thread pool for concurrent processing
+    auto pool = std::make_shared<thread_pool>("worker-pool");
+    pool->start();
+
+    // Submit jobs that integrate all three systems
+    std::atomic<int> jobs_completed{0};
+
+    for (int i = 0; i < 10; ++i) {
+        auto job = std::make_unique<callback_job>(
+            [i, log, &jobs_completed]() -> std::optional<std::string> {
+                // Log the processing (logger_system)
+                log->log(kcenon::thread::log_level::info,
+                    fmt::format("[Worker] Processing job {}", i));
+
+                // Simulate work (thread_system)
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+                // Store result in container (container_system)
+                value_container result;
+                result.add(std::make_shared<value>("job_id",
+                    value_types::int_value, std::to_string(i)));
+                result.add(std::make_shared<value>("status",
+                    value_types::string_value, "completed"));
+                result.add(std::make_shared<value>("result",
+                    value_types::int_value, std::to_string(i * 10)));
+
+                // Log completion
+                log->log(kcenon::thread::log_level::info,
+                    fmt::format("[Worker] Job {} completed with result: {}",
+                        i, i * 10));
+
+                jobs_completed++;
+                return std::nullopt; // Success
+            },
+            fmt::format("job-{}", i)
+        );
+
+        pool->enqueue(std::move(job));
+    }
+
+    // Wait for completion
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    std::cout << fmt::format("Jobs Completed: {}\n", jobs_completed.load());
+
+    // Cleanup
+    pool->stop();
+    log->stop();
+
+    return 0;
+}
+```
+
+**What this demonstrates:**
+- **Logger System**: Async logging from multiple threads without blocking
+- **Thread System**: Concurrent job execution with callback-based tasks
+- **Container System**: Type-safe data storage for results
+- **Integration**: How three systems work together seamlessly
+
+**Output:**
+```
+[2025-10-24 10:17:19.299] [INFO] [Worker] Processing job 0
+[2025-10-24 10:17:19.300] [INFO] [Worker] Processing job 1
+...
+[2025-10-24 10:17:19.450] [INFO] [Worker] Job 0 completed with result: 0
+Jobs Completed: 10
 ```
 
 ---
@@ -449,6 +597,7 @@ The build system automatically resolves dependencies in the following order:
 | **threads_sample** | ~100ms | 100,000 jobs | 1M jobs/sec |
 | **echo_server** | N/A (service) | - | 10K+ connections |
 | **echo_client** | ~10ms | 1,000 messages | 100K msg/sec |
+| **combined_sample** | ~2s | 10 async jobs | 5 jobs/sec |
 
 *Benchmarked on Apple M1 (8-core) @ 3.2GHz*
 
