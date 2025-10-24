@@ -58,6 +58,7 @@ This samples repository demonstrates practical usage of the modular C++ ecosyste
 | **[database_integration_sample](#9-database_integration_sample)** | database + thread + logger | ~350 | ⭐⭐⭐ Advanced | Async database operations with thread pool |
 | **[thread_integration_sample](#10-thread_integration_sample)** | thread + logger | ~450 | ⭐⭐⭐ Advanced | Priority-based scheduling and performance tracking |
 | **[monitoring_integration_sample](#11-monitoring_integration_sample)** | monitoring + thread + logger | ~400 | ⭐⭐⭐ Advanced | Real-time system monitoring and performance profiling |
+| **[messaging_integration_sample](#12-messaging_integration_sample)** | messaging + logger | ~500 | ⭐⭐⭐⭐ Expert | Pub/Sub and Request/Reply messaging patterns |
 
 ---
 
@@ -125,6 +126,9 @@ cd samples
 
 # Monitoring integration sample - Real-time system monitoring
 ./bin/monitoring_integration_sample
+
+# Messaging patterns (pub/sub, request/reply)
+./bin/messaging_integration_sample
 ```
 
 > 💡 **Next Steps**: Explore [Detailed Examples](#-detailed-examples) below or check individual sample READMEs
@@ -855,6 +859,196 @@ int main() {
 ```
 
 **Learn More:** [monitoring_integration_sample/README.md](monitoring_integration_sample/)
+
+---
+
+### 12. **messaging_integration_sample**
+
+**Complexity**: ⭐⭐⭐⭐ Expert | **LOC**: ~500
+
+Comprehensive demonstration of **messaging_system + logger_system** integration showcasing asynchronous messaging patterns for distributed systems.
+
+**Integration Architecture**:
+```
+┌─────────────────────────────────────────────────────┐
+│         messaging_integration_sample                │
+│                                                     │
+│  ┌──────────────┐    ┌──────────────┐            │
+│  │ Message Bus  │────│ Pub/Sub      │            │
+│  │              │    │ Pattern      │            │
+│  └──────┬───────┘    └──────────────┘            │
+│         │                                          │
+│         │            ┌──────────────┐            │
+│         └────────────│ Request/     │            │
+│                      │ Reply Pattern│            │
+│                      └──────────────┘            │
+│                                                     │
+│  ┌──────────────┐                                  │
+│  │Logger System │  (Observability)                │
+│  └──────────────┘                                  │
+└─────────────────────────────────────────────────────┘
+```
+
+**Key Features**:
+
+1. **Pub/Sub Pattern**
+   - Multiple topic subscriptions (orders, inventory, notifications, system broadcasts)
+   - Priority-based message routing
+   - Asynchronous message distribution
+   - Topic-based filtering
+
+2. **Request/Reply Pattern**
+   - Synchronous request/response with timeout
+   - Future-based async response handling
+   - Service query/response simulation
+   - Error handling and retry logic
+
+3. **Message Features**
+   - Message priorities (low, normal, high, critical)
+   - Message types (request, response, notification, broadcast)
+   - Metadata (sender, recipient, timestamp, headers)
+   - Variant-based payload (string, int64, double, bool, binary)
+
+4. **Statistics & Monitoring**
+   - Messages published/processed/failed counters
+   - Active subscriptions tracking
+   - Pending requests monitoring
+   - Custom metrics for different patterns
+
+**Usage**:
+```bash
+cd build
+./bin/messaging_integration_sample
+```
+
+**Expected Output**:
+```
+═══════════════════════════════════════════════════════
+  Messaging Integration Sample
+  (messaging + logger systems)
+═══════════════════════════════════════════════════════
+
+[Phase 1] Component Initialization...
+[Logger] Logger system initialized
+[Message Bus] Message bus initialized
+[Message Bus] Worker threads: 4
+[Message Bus] Max queue size: 10000
+
+[Phase 2] Pub/Sub Pattern - Subscribe to Topics...
+[Phase 2] Subscribed to 4 topics
+
+[Phase 3] Pub/Sub Pattern - Publish Messages...
+[Publisher] Published order message 1
+[Subscriber:Orders] Received order from: OrderService
+[Subscriber:Orders] Order ID: ORD-0001, Amount: $99.99
+...
+[Phase 3] Published 12 messages
+
+[Phase 4] Request/Reply Pattern...
+[Client] Sending request #1
+[Service] Received request: <id>
+[Service] Query: SELECT * FROM table_1
+[Client] Response #1: Processed: SELECT * FROM table_1 (success)
+...
+[Phase 4] Sent 3 requests, received 3 responses
+
+[Phase 5] Final Statistics...
+╔═════════════════════════════════════════════════════════╗
+║       Message Bus Statistics Dashboard               ║
+╚═════════════════════════════════════════════════════════╝
+
+📊 Message Bus Metrics:
+   Published:         15
+   Processed:         15
+   Failed:            0
+   Active Subs:       4
+   Pending Requests:  0
+
+📈 Custom Metrics:
+   Total Published:   15
+   Total Received:    12
+   Requests Sent:     3
+   Responses Recv:    3
+   Notifications:     3
+   Broadcasts:        1
+
+Integration Summary:
+✓ messaging_system:       SUCCESS (15 messages published)
+✓ logger_system:          SUCCESS
+✓ Pub/Sub Pattern:        12 messages received
+✓ Request/Reply Pattern:  3/3 responses
+✓ Topics:                 4 active
+```
+
+**Code Example: Pub/Sub Pattern**
+```cpp
+// Subscribe to a topic
+bus->subscribe("orders", [](const message& msg) {
+    auto order_id = msg.payload.get<std::string>("order_id");
+    auto amount = msg.payload.get<double>("amount");
+
+    std::cout << "Order " << order_id << ": $" << amount << std::endl;
+});
+
+// Publish message to topic
+auto msg = message("orders", "OrderService");
+msg.payload.set("order_id", "ORD-0001");
+msg.payload.set("amount", 99.99);
+msg.metadata.priority = message_priority::high;
+
+bus->publish(msg);
+```
+
+**Code Example: Request/Reply Pattern**
+```cpp
+// Service responds to requests
+bus->subscribe("service.query", [&bus](const message& request_msg) {
+    auto query = request_msg.payload.get<std::string>("query");
+
+    // Process query...
+
+    message response("service.response", "QueryService");
+    response.metadata.type = message_type::response;
+    response.payload.set("result", "Processed: " + query);
+    response.payload.set("status", "success");
+
+    bus->respond(request_msg, response);
+});
+
+// Client sends request
+auto request_msg = message("service.query", "ClientService");
+request_msg.metadata.type = message_type::request;
+request_msg.metadata.timeout = std::chrono::milliseconds(5000);
+request_msg.payload.set("query", "SELECT * FROM users");
+
+auto future_response = bus->request(request_msg);
+
+// Wait for response
+if (future_response.wait_for(std::chrono::seconds(3)) == std::future_status::ready) {
+    auto response = future_response.get();
+    auto result = response.payload.get<std::string>("result");
+    std::cout << "Result: " << result << std::endl;
+}
+```
+
+**Educational Value**:
+- ✅ Asynchronous messaging patterns (Pub/Sub, Request/Reply)
+- ✅ Message routing and topic-based distribution
+- ✅ Priority-based message processing
+- ✅ Timeout handling and error recovery
+- ✅ Message serialization and payload management
+- ✅ Distributed system communication patterns
+- ✅ Real-time statistics and monitoring
+
+**Real-World Applications**:
+- Microservices communication (event-driven architecture)
+- Message queue systems (RabbitMQ, Kafka patterns)
+- Distributed task processing
+- Event sourcing and CQRS patterns
+- Real-time notification systems
+- Service orchestration and choreography
+
+**Learn More:** [messaging_integration_sample/README.md](messaging_integration_sample/)
 
 ---
 

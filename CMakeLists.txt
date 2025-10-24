@@ -205,6 +205,7 @@ if(SAMPLES_BUILD_EXAMPLES)
     ADD_SUBDIRECTORY(database_integration_sample)
     ADD_SUBDIRECTORY(thread_integration_sample)
     ADD_SUBDIRECTORY(monitoring_integration_sample)
+    ADD_SUBDIRECTORY(messaging_integration_sample)
 
     message(STATUS "Sample programs configured")
 endif()
