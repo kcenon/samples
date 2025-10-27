@@ -1,6 +1,6 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.16)
 
-SET(PROGRAM_NAME echo_server)
+SET(PROGRAM_NAME secure_echo_server)
 PROJECT(${PROGRAM_NAME})
 
 # C++20 standard
@@ -8,10 +8,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Create executable
-ADD_EXECUTABLE(${PROGRAM_NAME} echo_server.cpp)
+ADD_EXECUTABLE(${PROGRAM_NAME} secure_echo_server.cpp)
 
 # Link against system libraries
-# This sample demonstrates network_system TCP server with callbacks
+# This sample demonstrates network_system secure TCP server with TLS/SSL
 TARGET_LINK_LIBRARIES(${PROGRAM_NAME} PRIVATE
     NetworkSystem
     LoggerSystem

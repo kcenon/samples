@@ -31,16 +31,16 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 \*****************************************************************************/
 
 /**
- * @file echo_server.cpp
- * @brief TCP Echo Server Sample
+ * @file secure_echo_server.cpp
+ * @brief Secure TCP Echo Server Sample (TLS/SSL)
  *
  * This sample demonstrates:
- * - Creating a TCP server with messaging_server
- * - Handling client connections and disconnections
- * - Receiving messages from clients
- * - Echoing received data back to sender
- * - Handling errors gracefully
- * - Proper server shutdown
+ * - Creating a secure TCP server with TLS/SSL encryption
+ * - Loading SSL certificates and private keys
+ * - Handling encrypted client connections
+ * - Receiving and sending encrypted messages
+ * - Handling TLS handshake errors
+ * - Proper secure server shutdown
  */
 
 #include <iostream>
@@ -50,9 +50,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <csignal>
 #include <thread>
 #include <chrono>
+#include <filesystem>
 
-#include "network_system/core/messaging_server.h"
-#include "network_system/session/messaging_session.h"
+#include "network_system/core/secure_messaging_server.h"
+#include "network_system/session/secure_session.h"
 
 using namespace network_system::core;
 
@@ -71,17 +72,45 @@ void signal_handler(int signal)
 int main(int argc, char* argv[])
 {
     std::cout << "=================================================\n";
-    std::cout << "  TCP Echo Server Sample\n";
+    std::cout << "  Secure TCP Echo Server Sample (TLS/SSL)\n";
     std::cout << "=================================================\n\n";
 
-    // Parse port from command line (default: 9876)
-    uint16_t port = 9876;
+    // Parse command line arguments
+    uint16_t port = 9877;
+    std::string cert_file = "server.crt";
+    std::string key_file = "server.key";
+
     if (argc > 1)
     {
         port = static_cast<uint16_t>(std::atoi(argv[1]));
     }
+    if (argc > 2)
+    {
+        cert_file = argv[2];
+    }
+    if (argc > 3)
+    {
+        key_file = argv[3];
+    }
 
-    std::cout << "[Server] Starting TCP echo server on port " << port << "...\n";
+    // Check if certificate and key files exist
+    if (!std::filesystem::exists(cert_file))
+    {
+        std::cerr << "[Server] Certificate file not found: " << cert_file << "\n";
+        std::cerr << "[Server] Please generate certificates using: ./generate_cert.sh\n";
+        return 1;
+    }
+
+    if (!std::filesystem::exists(key_file))
+    {
+        std::cerr << "[Server] Key file not found: " << key_file << "\n";
+        std::cerr << "[Server] Please generate certificates using: ./generate_cert.sh\n";
+        return 1;
+    }
+
+    std::cout << "[Server] Using certificate: " << cert_file << "\n";
+    std::cout << "[Server] Using private key: " << key_file << "\n";
+    std::cout << "[Server] Starting secure TCP echo server on port " << port << "...\n";
 
     // Set up signal handlers for graceful shutdown
     std::signal(SIGINT, signal_handler);
@@ -89,14 +118,15 @@ int main(int argc, char* argv[])
 
     try
     {
-        // Create TCP server
-        auto server = std::make_shared<messaging_server>("TCPEchoServer");
+        // Create secure TCP server with TLS/SSL
+        auto server = std::make_shared<secure_messaging_server>(
+            "SecureTCPEchoServer", cert_file, key_file);
 
-        // Set up connection callback - log new connections
+        // Set up connection callback - log new secure connections
         server->set_connection_callback(
             [](auto session)
             {
-                std::cout << "[Server] New client connected\n";
+                std::cout << "[Server] New secure client connected (TLS handshake complete)\n";
             });
 
         // Set up disconnection callback - log disconnections
@@ -106,35 +136,39 @@ int main(int argc, char* argv[])
                 std::cout << "[Server] Client disconnected: " << session_id << "\n";
             });
 
-        // Set up receive callback - echo messages back
+        // Set up receive callback - echo encrypted messages back
         server->set_receive_callback(
             [](auto session, const std::vector<uint8_t>& data)
             {
                 // Convert received data to string for display
                 std::string message(data.begin(), data.end());
 
-                std::cout << "[Server] Received " << data.size() << " bytes"
+                std::cout << "[Server] Received " << data.size() << " bytes (encrypted)"
                           << " - Message: \"" << message << "\"\n";
 
                 // Create echo response
-                std::string echo_msg = "Echo: " + message;
+                std::string echo_msg = "Secure Echo: " + message;
                 std::vector<uint8_t> echo_data(echo_msg.begin(), echo_msg.end());
 
-                // Send echo back to client
+                // Send encrypted echo back to client
                 session->send_packet(std::move(echo_data));
 
-                std::cout << "[Server] Sent echo response (" << echo_msg.size()
+                std::cout << "[Server] Sent encrypted echo response (" << echo_msg.size()
                           << " bytes)\n";
             });
 
-        // Set up error callback
+        // Set up error callback - handle TLS errors
         server->set_error_callback(
             [](auto session, std::error_code ec)
             {
                 std::cerr << "[Server] Error occurred: " << ec.message() << "\n";
+                if (ec.category() == asio::error::get_ssl_category())
+                {
+                    std::cerr << "[Server] SSL/TLS error detected\n";
+                }
             });
 
-        // Start the server
+        // Start the secure server
         auto result = server->start_server(port);
         if (result.is_err())
         {
@@ -143,8 +177,9 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-        std::cout << "[Server] TCP echo server is running on port " << port << "\n";
-        std::cout << "[Server] Waiting for connections... (Press Ctrl+C to stop)\n\n";
+        std::cout << "[Server] Secure TCP echo server is running on port " << port << "\n";
+        std::cout << "[Server] All connections are encrypted with TLS/SSL\n";
+        std::cout << "[Server] Waiting for secure connections... (Press Ctrl+C to stop)\n\n";
 
         // Main loop - wait for shutdown signal
         while (!should_stop.load())
@@ -153,7 +188,7 @@ int main(int argc, char* argv[])
         }
 
         // Graceful shutdown
-        std::cout << "\n[Server] Stopping server...\n";
+        std::cout << "\n[Server] Stopping secure server...\n";
         auto stop_result = server->stop_server();
         if (stop_result.is_ok())
         {

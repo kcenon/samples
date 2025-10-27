@@ -1,7 +1,7 @@
-/*****************************************************************************
+/*****************************************************************************\
 BSD 3-Clause License
 
-Copyright (c) 2021, 🍀☀🌕🌥 🌊
+Copyright (c) 2024, kcenon
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -28,170 +28,173 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*****************************************************************************/
+\*****************************************************************************/
+
+/**
+ * @file echo_client.cpp
+ * @brief TCP Echo Client Sample
+ *
+ * This sample demonstrates:
+ * - Creating a TCP client with messaging_client
+ * - Connecting to a remote server
+ * - Sending messages to the server
+ * - Receiving echo responses from the server
+ * - Handling connection/disconnection events
+ * - Handling errors gracefully
+ * - Proper client shutdown
+ */
 
 #include <iostream>
 #include <memory>
 #include <string>
+#include <atomic>
 #include <thread>
 #include <chrono>
-#include <unordered_map>
-#include <functional>
-#include <vector>
-#include <atomic>
-#include <condition_variable>
-#include <mutex>
-
 
 #include "network_system/core/messaging_client.h"
-#include "container/container.h"
-#include "fmt/format.h"
-#include "fmt/xchar.h"
-
-constexpr auto PROGRAM_NAME = L"echo_client";
 
 using namespace network_system::core;
-using namespace container_module;
 
-// Simple logger
-enum class LogLevel { Debug, Information, Warning, Error, Parameter };
-enum class LogStyle { ConsoleOnly, FileOnly, FileAndConsole };
-
-#ifdef _DEBUG
-LogLevel log_level = LogLevel::Parameter;
-LogStyle log_style = LogStyle::ConsoleOnly;
-#else
-LogLevel log_level = LogLevel::Information;
-LogStyle log_style = LogStyle::FileOnly;
-#endif
-
-// Configuration
-std::wstring server_ip = L"127.0.0.1";
-unsigned short server_port = 9876;
-bool running = true;
-
-// Enhanced network client using messaging_system
-class EchoClient {
-private:
-    std::shared_ptr<messaging_client> client_;
-    std::atomic<bool> connected_ = false;
-    std::atomic<bool> running_ = false;
-    std::string client_id_;
-    std::mutex message_mutex_;
-
-public:
-    EchoClient(const std::string& client_id) : client_id_(client_id) {
-        client_ = std::make_shared<messaging_client>(client_id_);
-    }
-    
-    ~EchoClient() {
-        stop();
-    }
-    
-    void start(const std::string& server_ip, unsigned short server_port) {
-        if (running_) return;
-        
-        running_ = true;
-        std::wcout << fmt::format(L"[INFO] Starting client and connecting to {}:{}", 
-                                 std::wstring(server_ip.begin(), server_ip.end()), server_port) << std::endl;
-        
-        client_->start_client(server_ip, server_port);
-        
-        // Wait a moment for connection
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        connected_ = true;
-        
-        std::wcout << fmt::format(L"[INFO] Connected to {}:{}", 
-                                 std::wstring(server_ip.begin(), server_ip.end()), server_port) << std::endl;
-    }
-    
-    void stop() {
-        if (!running_) return;
-        
-        running_ = false;
-        connected_ = false;
-        
-        if (client_) {
-            client_->stop_client();
-        }
-        
-        std::wcout << L"[INFO] Client stopped" << std::endl;
-    }
-    
-    bool is_connected() const {
-        return connected_ && running_;
-    }
-    
-    void send_echo_message(const std::string& message) {
-        if (!is_connected()) {
-            std::wcout << L"[WARNING] Not connected, cannot send message" << std::endl;
-            return;
-        }
-        
-        std::lock_guard<std::mutex> lock(message_mutex_);
-        
-        // Create container with echo message
-        auto msg_container = std::make_shared<container_module::value_container>();
-        msg_container->set_source(client_id_, "echo_client");
-        msg_container->set_target("echo_server", "main");
-        msg_container->set_message_type("echo_request");
-        
-        // Add message content
-        auto message_value = std::make_shared<container_module::value>("message", container_module::value_types::string_value, message);
-        auto timestamp_value = std::make_shared<container_module::value>("timestamp", container_module::value_types::string_value, 
-            std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count()));
-        
-        msg_container->add(message_value);
-        msg_container->add(timestamp_value);
-        
-        // Serialize and send
-        std::string serialized = msg_container->serialize();
-        std::vector<uint8_t> data(serialized.begin(), serialized.end());
-
-        client_->send_packet(std::move(data));
-        
-        std::wcout << fmt::format(L"[INFO] Sent echo message: {}", 
-                                 std::wstring(message.begin(), message.end())) << std::endl;
-    }
-};
+// Statistics tracking
+std::atomic<int> messages_sent{0};
+std::atomic<int> messages_received{0};
 
 int main(int argc, char* argv[])
 {
-    std::wcout << L"Echo Client starting..." << std::endl;
-    
-    // Set defaults
-    log_level = LogLevel::Information;
-    log_style = LogStyle::ConsoleOnly;
-    
-    std::wcout << L"Using default configuration (server=localhost:8080, log_level=Information)" << std::endl;
-    
-    // Create and start client
-    EchoClient client("echo_client_001");
-    
-    // Convert wstring to string for the client
-    std::string server_ip_str(server_ip.begin(), server_ip.end());
-    client.start(server_ip_str, server_port);
-    
-    // Check connection
-    if (!client.is_connected()) {
-        std::wcout << L"Failed to connect to server" << std::endl;
+    std::cout << "=================================================\n";
+    std::cout << "  TCP Echo Client Sample\n";
+    std::cout << "=================================================\n\n";
+
+    // Parse server address from command line (default: localhost:9876)
+    std::string server_host = "127.0.0.1";
+    uint16_t server_port = 9876;
+
+    if (argc > 1)
+    {
+        server_host = argv[1];
+    }
+    if (argc > 2)
+    {
+        server_port = static_cast<uint16_t>(std::atoi(argv[2]));
+    }
+
+    std::cout << "[Client] Connecting to " << server_host << ":" << server_port << "...\n";
+
+    try
+    {
+        // Create TCP client
+        auto client = std::make_shared<messaging_client>("TCPEchoClient");
+
+        // Set up connected callback
+        client->set_connected_callback(
+            []()
+            {
+                std::cout << "[Client] Connected to server\n";
+            });
+
+        // Set up disconnected callback
+        client->set_disconnected_callback(
+            []()
+            {
+                std::cout << "[Client] Disconnected from server\n";
+            });
+
+        // Set up receive callback - display echo responses
+        client->set_receive_callback(
+            [](const std::vector<uint8_t>& data)
+            {
+                std::string response(data.begin(), data.end());
+                std::cout << "[Client] Received response (" << data.size() << " bytes): \""
+                          << response << "\"\n";
+                messages_received++;
+            });
+
+        // Set up error callback
+        client->set_error_callback(
+            [](std::error_code ec)
+            {
+                std::cerr << "[Client] Error occurred: " << ec.message() << "\n";
+            });
+
+        // Start the client and connect to server
+        auto result = client->start_client(server_host, server_port);
+        if (result.is_err())
+        {
+            std::cerr << "[Client] Failed to start client: "
+                      << result.error().message << "\n";
+            return 1;
+        }
+
+        // Wait for connection to establish
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+        if (!client->is_connected())
+        {
+            std::cerr << "[Client] Failed to connect to server\n";
+            return 1;
+        }
+
+        std::cout << "[Client] Sending echo messages...\n\n";
+
+        // Send 5 test messages
+        const int num_messages = 5;
+        for (int i = 1; i <= num_messages; ++i)
+        {
+            std::string message = "Hello from client, message #" + std::to_string(i);
+            std::vector<uint8_t> data(message.begin(), message.end());
+
+            std::cout << "[Client] Sending message #" << i << ": \"" << message << "\"\n";
+
+            auto send_result = client->send_packet(std::move(data));
+            if (send_result.is_err())
+            {
+                std::cerr << "[Client] Failed to send message: "
+                          << send_result.error().message << "\n";
+            }
+            else
+            {
+                messages_sent++;
+            }
+
+            // Wait for response before sending next message
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        // Wait a bit more for final responses
+        std::cout << "\n[Client] Waiting for remaining responses...\n";
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+
+        // Display statistics
+        std::cout << "\n=================================================\n";
+        std::cout << "  Statistics\n";
+        std::cout << "=================================================\n";
+        std::cout << "Messages sent:     " << messages_sent.load() << "\n";
+        std::cout << "Messages received: " << messages_received.load() << "\n";
+        std::cout << "Success rate:      "
+                  << (messages_sent.load() > 0
+                          ? (messages_received.load() * 100 / messages_sent.load())
+                          : 0)
+                  << "%\n";
+        std::cout << "=================================================\n\n";
+
+        // Stop the client
+        std::cout << "[Client] Stopping client...\n";
+        auto stop_result = client->stop_client();
+        if (stop_result.is_ok())
+        {
+            std::cout << "[Client] Client stopped successfully.\n";
+        }
+        else
+        {
+            std::cerr << "[Client] Error stopping client: "
+                      << stop_result.error().message << "\n";
+        }
+
+        return 0;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[Client] Exception: " << e.what() << "\n";
         return 1;
     }
-    
-    // Main message loop - sends an echo message every 2 seconds
-    int messageCount = 0;
-    while (running && messageCount < 5) {
-        std::string message = fmt::format("Echo test message #{}", messageCount++);
-        client.send_echo_message(message);
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-    }
-    
-    std::wcout << L"Echo Client shutting down..." << std::endl;
-    client.stop();
-    
-    return 0;
 }
-
-// Argument parsing functions removed for simplicity
-// This is a simplified sample that uses default configuration
